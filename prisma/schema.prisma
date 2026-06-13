@@ -1,0 +1,169 @@
+// スケジュール調整ツール データモデル（仕様 §8）
+// ダブルブッキング防止の要 = Hold の EXCLUDE 制約は Prisma で表現できないため
+// prisma/migrations/0001_init/migration.sql の生SQLで付与する（仕様 §12 強化）。
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AdjustmentType {
+  T1
+  T2
+  T3
+  T4
+  T5
+  T6
+}
+
+enum EventStatus {
+  draft
+  open
+  holding
+  confirmed
+  closed
+  expired
+  cancelled
+}
+
+enum HoldStatus {
+  active
+  released
+  confirmed
+}
+
+enum RelaySubMode {
+  converge
+  chained
+  independent
+}
+
+enum RelayStepStatus {
+  waiting
+  active
+  done
+  skipped
+}
+
+model BookingPage {
+  id          String         @id @default(cuid())
+  organizerId String
+  type        AdjustmentType
+  slug        String         @unique
+  isActive    Boolean        @default(true)
+  settings    Json // §10 settings スキーマ
+  createdAt   DateTime       @default(now())
+  events      Event[]
+}
+
+model Event {
+  id             String         @id @default(cuid())
+  pageId         String
+  page           BookingPage    @relation(fields: [pageId], references: [id])
+  type           AdjustmentType
+  status         EventStatus    @default(open)
+  idempotencyKey String?        @unique // §7-6 冪等
+  createdAt      DateTime       @default(now())
+  candidates     Candidate[]
+  holds          Hold[]
+  confirmations  Confirmation[]
+  relaySteps     RelayStep[]
+  votes          Vote[]
+}
+
+model Candidate {
+  id      String   @id @default(cuid())
+  eventId String
+  event   Event    @relation(fields: [eventId], references: [id])
+  // UTC 保存・15分グリッド（§7-1/§7-2）
+  startAt DateTime
+  endAt   DateTime
+  holds   Hold[]
+
+  @@index([eventId])
+}
+
+model Hold {
+  id          String     @id @default(cuid())
+  eventId     String
+  event       Event      @relation(fields: [eventId], references: [id])
+  candidateId String
+  candidate   Candidate  @relation(fields: [candidateId], references: [id])
+  resourceId  String // 主催者枠 or 会議室など共有リソース
+  holderId    String
+  startAt     DateTime
+  endAt       DateTime
+  status      HoldStatus @default(active)
+  expiresAt   DateTime // TTL（既定15分）
+  createdAt   DateTime   @default(now())
+
+  // ★ ダブルブッキング物理防止は migration.sql の EXCLUDE 制約で担保：
+  //   EXCLUDE USING gist (resource_id WITH =, tstzrange(start_at, end_at) WITH &&)
+  //   WHERE (status = 'active')
+  @@index([eventId])
+  @@index([resourceId, status])
+}
+
+model Confirmation {
+  id            String   @id @default(cuid())
+  eventId       String
+  event         Event    @relation(fields: [eventId], references: [id])
+  participantId String
+  startAt       DateTime
+  endAt         DateTime
+  formAnswers   Json? // §6 予約フォーム回答
+  confirmedAt   DateTime @default(now())
+
+  @@index([eventId])
+}
+
+model RelayStep {
+  id         String          @id @default(cuid())
+  eventId    String
+  event      Event           @relation(fields: [eventId], references: [id])
+  order      Int
+  assigneeId String
+  subMode    RelaySubMode    @default(converge)
+  status     RelayStepStatus @default(waiting)
+  deadline   DateTime?
+  slotStart  DateTime?
+  slotEnd    DateTime?
+
+  @@unique([eventId, order])
+  @@index([eventId])
+}
+
+model Vote {
+  id          String   @id @default(cuid())
+  eventId     String
+  event       Event    @relation(fields: [eventId], references: [id])
+  candidateId String
+  voterId     String
+  createdAt   DateTime @default(now())
+
+  @@unique([eventId, candidateId, voterId]) // 二重投票防止
+  @@index([eventId])
+}
+
+model Resource {
+  id       String @id @default(cuid())
+  kind     String // "room" | "web_conf" | "organizer"
+  name     String
+  capacity Int    @default(1)
+}
+
+model AuditLog {
+  id      String   @id @default(cuid())
+  eventId String?
+  actorId String
+  action  String
+  before  Json?
+  after   Json?
+  at      DateTime @default(now()) // 追記専用（§18）
+
+  @@index([eventId])
+}
