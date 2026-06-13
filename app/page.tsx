@@ -1,136 +1,179 @@
-const DAYS = ['月', '火', '水', '木', '金'];
-const TIMES = ['10:00', '10:30', '11:00', '11:30', '12:00'];
+'use client';
+import { useState } from 'react';
 
-// デモ用の枠状態（free=空き / booked=予定あり / pick=選択中）
-const CAL: Record<string, 'free' | 'booked' | 'pick'> = {
-  '0-0': 'free', '1-0': 'free', '2-0': 'booked', '3-0': 'free', '4-0': 'free',
-  '0-1': 'free', '1-1': 'pick', '2-1': 'booked', '3-1': 'free', '4-1': 'free',
-  '0-2': 'booked', '1-2': 'free', '2-2': 'free', '3-2': 'free', '4-2': 'booked',
-  '0-3': 'free', '1-3': 'free', '2-3': 'free', '3-3': 'booked', '4-3': 'free',
-  '0-4': 'free', '1-4': 'booked', '2-4': 'free', '3-4': 'free', '4-4': 'free',
-};
-
-const TYPES = [
-  { tag: 'T1', name: '空き時間リンク', desc: '空き枠をURLで共有。相手が1枠選ぶだけ。繰り返し使える。' },
-  { tag: 'T2', name: '確定型', desc: '候補を提示して、選んだ瞬間に確定。' },
-  { tag: 'T3', name: '投票型', desc: '複数候補に投票。3人以上の日程決めに。' },
-  { tag: 'T4', name: 'チーム全員型', desc: 'チーム全員の共通の空きを自動で抽出。' },
-  { tag: 'T5', name: 'チーム単数（RR）', desc: '担当を負荷分散で自動割当。' },
-  { tag: 'T6', name: 'リレー型', desc: 'A→B→C と1人ずつ順番に確定。Spirにも無い独自機能。', must: true },
+const DAYS = [
+  { d: '月', date: '6/15' },
+  { d: '火', date: '6/16' },
+  { d: '水', date: '6/17' },
+  { d: '木', date: '6/18' },
+  { d: '金', date: '6/19' },
 ];
+const HOURS = [9, 10, 11, 12, 13, 14, 15, 16, 17];
+
+type Ev = { day: number; start: number; len: number; title: string; kind: 'busy' | 'tentative' };
+// 「自分のGoogle/Outlookカレンダーから同期された予定」（入っているように見える）
+const EVENTS: Ev[] = [
+  { day: 0, start: 9, len: 1, title: '朝礼', kind: 'busy' },
+  { day: 0, start: 11, len: 1, title: '商談（A社）', kind: 'busy' },
+  { day: 0, start: 15, len: 1, title: '1on1 脇本', kind: 'tentative' },
+  { day: 1, start: 10, len: 2, title: '定例会議', kind: 'busy' },
+  { day: 1, start: 14, len: 1, title: '採用面接', kind: 'busy' },
+  { day: 2, start: 13, len: 2, title: '現場巡回', kind: 'busy' },
+  { day: 3, start: 9, len: 1, title: '経営会議', kind: 'busy' },
+  { day: 3, start: 16, len: 1, title: '取引先訪問', kind: 'tentative' },
+  { day: 4, start: 11, len: 1, title: '月次レビュー', kind: 'busy' },
+  { day: 4, start: 17, len: 1, title: '週次MTG', kind: 'busy' },
+];
+// 公開する「予約可能」枠（相手が選べる緑の枠）
+const OPEN = new Set(['0-10', '0-14', '1-13', '2-10', '2-16', '3-11', '3-14', '4-9', '4-15']);
+
+function evAt(day: number, hour: number): Ev | undefined {
+  return EVENTS.find((e) => e.day === day && hour >= e.start && hour < e.start + e.len);
+}
+function evStart(day: number, hour: number): Ev | undefined {
+  return EVENTS.find((e) => e.day === day && e.start === hour);
+}
 
 export default function Home() {
+  const [picked, setPicked] = useState<string | null>('1-13');
+  const [dur, setDur] = useState(30);
+
   return (
     <>
       <nav className="nav">
-        <div className="wrap" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 0 }}>
+        <div className="wrap navin">
           <div className="logo"><span className="mark">📅</span>スケジュール調整くん</div>
-          <span className="url">schedule.takagi.bz</span>
+          <div className="navright">
+            <span className="sync"><span className="dot-live" />Googleカレンダー同期中</span>
+            <span className="url">schedule.takagi.bz</span>
+          </div>
         </div>
       </nav>
 
       <header className="hero">
         <div className="wrap">
-          <span className="badge">Spirの全機能 ＋ リレー型調整</span>
-          <h1>日程調整を、<span className="accent">1画面で</span>。<br />順番に決める<span className="accent">リレー型</span>もこれだけ。</h1>
-          <p>Google・Microsoftカレンダーと連携。空き時間リンク・確定・投票・チーム調整に加えて、A→B→C と順番に決める「リレー型」調整ができる、唯一の日程調整ツール。</p>
-          <div className="cta">
-            <a className="btn primary" href="#calendar">空き枠を見る</a>
-            <a className="btn ghost" href="#types">調整タイプを見る</a>
-          </div>
+          <span className="badge">カレンダーと同期 ・ 1画面で日程調整</span>
+          <h1>あなたの予定はそのまま。<br /><span className="accent">空いてる時間だけ</span>、相手に。</h1>
+          <p>Google・Microsoftカレンダーと自動同期。入っている予定はそのまま見えて、空き枠だけを共有。二重予約は起きません。順番に決める<strong>リレー型</strong>もこれだけ。</p>
         </div>
       </header>
 
-      <section className="section" id="calendar">
+      <section className="section">
         <div className="wrap">
-          <h2>空きを見て、選んで、確定。</h2>
-          <p className="lead">週カレンダーから空き枠をタップするだけ。タイムゾーンは自動。二重予約はシステムが物理的に防止します。</p>
-          <div className="cal">
-            <div className="cal-head">
-              <span className="title">2026年6月15日(月) の週</span>
-              <span className="tz">🌐 Asia/Tokyo (自動)</span>
+          <div className="toolbar">
+            <div className="tb-left">
+              <button className="navbtn">‹</button>
+              <strong>2026年 6月15日 - 19日</strong>
+              <button className="navbtn">›</button>
+              <span className="today">今日</span>
             </div>
-            <div className="grid">
-              <div className="cell colhead"></div>
-              {DAYS.map((d) => (<div key={d} className="cell colhead">{d}</div>))}
-              {TIMES.map((t, row) => (
-                <RowFragment key={t} time={t} row={row} />
+            <div className="tb-right">
+              <label className="durpick">所要
+                <select value={dur} onChange={(e) => setDur(Number(e.target.value))}>
+                  <option value={15}>15分</option>
+                  <option value={30}>30分</option>
+                  <option value={45}>45分</option>
+                  <option value={60}>60分</option>
+                </select>
+              </label>
+              <span className="tz">🌐 Asia/Tokyo</span>
+            </div>
+          </div>
+
+          <div className="cal2">
+            <div className="cal2-grid">
+              <div className="corner" />
+              {DAYS.map((d) => (
+                <div key={d.d} className="dayhead">
+                  <span className="dnum">{d.date}</span><span className="dlabel">{d.d}</span>
+                </div>
+              ))}
+              {HOURS.map((h) => (
+                <Row key={h} hour={h} picked={picked} setPicked={setPicked} />
               ))}
             </div>
           </div>
-          <p className="lead" style={{ marginTop: 12, fontSize: 13 }}>
-            <span style={{ color: 'var(--brand)', fontWeight: 700 }}>■</span> 空き（選べる）
-            <span style={{ color: 'var(--ok)', fontWeight: 700 }}>■</span> 選択中
-            <span style={{ color: 'var(--muted)', fontWeight: 700 }}>■</span> 予定あり
-          </p>
+
+          <div className="legend">
+            <span><i className="lg busy" />予定あり（同期）</span>
+            <span><i className="lg tent" />仮の予定</span>
+            <span><i className="lg open" />予約可能（相手が選べる）</span>
+            <span><i className="lg pick" />選択中</span>
+          </div>
+        </div>
+      </section>
+
+      <section className="section relaysec">
+        <div className="wrap">
+          <h2>🔴 リレー型（A→B→C）— Spirにも無い独自機能</h2>
+          <p className="lead">「Aさんが決めたら次にBさん、最後にCさん」と1人ずつ順番に確定。承認・順次面談がそのまま回ります。</p>
+          <div className="relay">
+            <div className="steps">
+              <div className="step"><span className="dot done">A</span><span className="label"><span className="who">高木</span><br /><span className="st">✓ 6/16 13:00 確定</span></span></div>
+              <span className="bar fill" />
+              <div className="step"><span className="dot active">B</span><span className="label"><span className="who">脇本</span><br /><span className="st">いま確認中…</span></span></div>
+              <span className="bar" />
+              <div className="step"><span className="dot wait">C</span><span className="label"><span className="who">松本</span><br /><span className="st">順番待ち</span></span></div>
+            </div>
+          </div>
         </div>
       </section>
 
       <section className="section">
         <div className="wrap">
-          <h2>🔴 リレー型（A→B→C）— ここが他に無い</h2>
-          <p className="lead">「Aさんが決めたら、次にBさん、最後にCさん」と、1人ずつ順番に予定を確定。承認や順次面談がそのまま回せます。</p>
-          <div className="relay">
-            <strong>例：A → B → C で全員同じ枠に収束（converge）</strong>
-            <div className="steps">
-              <div className="step">
-                <span className="dot done">A</span>
-                <span className="label"><span className="who">高木</span><br /><span className="st">✓ 6/15 11:00 を確定</span></span>
-              </div>
-              <span className="bar fill" />
-              <div className="step">
-                <span className="dot active">B</span>
-                <span className="label"><span className="who">脇本</span><br /><span className="st">いま確認中…</span></span>
-              </div>
-              <span className="bar" />
-              <div className="step">
-                <span className="dot wait">C</span>
-                <span className="label"><span className="who">松本</span><br /><span className="st">順番待ち</span></span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="section" id="types">
-        <div className="wrap">
-          <h2>6つの調整タイプ</h2>
-          <p className="lead">Spirの全機能（T1〜T5）に、リレー型（T6）を追加。用途で使い分けられます。</p>
+          <h2>6つの調整タイプ（Spir全機能 ＋ リレー型）</h2>
           <div className="cards">
-            {TYPES.map((t) => (
-              <div key={t.tag} className={t.must ? 'fcard relay-card' : 'fcard'}>
-                <span className="tag">{t.tag}</span>
-                <h3>{t.name}</h3>
-                <p>{t.desc}</p>
-                {t.must && <span className="must">MUST・独自機能</span>}
+            {[
+              { t: 'T1', n: '空き時間リンク', d: '空き枠をURLで共有。繰り返し使える。' },
+              { t: 'T2', n: '確定型', d: '候補を選んだ瞬間に確定。' },
+              { t: 'T3', n: '投票型', d: '複数候補に投票して決定。' },
+              { t: 'T4', n: 'チーム全員型', d: 'チームの共通の空きを自動抽出。' },
+              { t: 'T5', n: 'チーム単数（RR）', d: '担当を負荷分散で自動割当。' },
+              { t: 'T6', n: 'リレー型', d: 'A→B→C と順番に確定。独自機能。', must: true },
+            ].map((x) => (
+              <div key={x.t} className={x.must ? 'fcard relay-card' : 'fcard'}>
+                <span className="tag">{x.t}</span><h3>{x.n}</h3><p>{x.d}</p>
+                {x.must && <span className="must">MUST・独自</span>}
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      <footer>
-        <div className="wrap">
-          スケジュール調整くん（プレビュー版）／ schedule.takagi.bz<br />
-          高木産業グループ・CTO Agent Lab ｜ このページは画面プレビューです（バックエンド結線は順次）
-        </div>
-      </footer>
+      <footer><div className="wrap">スケジュール調整くん（プレビュー版）／ schedule.takagi.bz ｜ 高木産業グループ・CTO Agent Lab</div></footer>
     </>
   );
 }
 
-function RowFragment({ time, row }: { time: string; row: number }) {
+function Row({ hour, picked, setPicked }: { hour: number; picked: string | null; setPicked: (v: string) => void }) {
   return (
     <>
-      <div className="cell timecol">{time}</div>
-      {DAYS.map((_, col) => {
-        const state = CAL[`${col}-${row}`] ?? 'free';
-        const label = state === 'free' ? '空き' : state === 'pick' ? '選択中' : '—';
-        return (
-          <div className="cell" key={col}>
-            <div className={`slot ${state}`}>{label}</div>
-          </div>
-        );
+      <div className="timecol">{hour}:00</div>
+      {DAYS.map((_, day) => {
+        const key = `${day}-${hour}`;
+        const ev = evAt(day, hour);
+        const head = evStart(day, hour);
+        if (ev && !head) return <div key={day} className="c2 spanned" />; // 連続予定の2コマ目
+        if (ev && head) {
+          return (
+            <div key={day} className="c2">
+              <div className={`event ${ev.kind}`} style={{ height: `${ev.len * 46 - 6}px` }}>
+                <b>{ev.start}:00</b> {ev.title}
+              </div>
+            </div>
+          );
+        }
+        if (OPEN.has(key)) {
+          const sel = picked === key;
+          return (
+            <div key={day} className="c2">
+              <button className={`open ${sel ? 'sel' : ''}`} onClick={() => setPicked(key)}>
+                {sel ? '✓ 選択中' : '予約可能'}
+              </button>
+            </div>
+          );
+        }
+        return <div key={day} className="c2 empty" />;
       })}
     </>
   );
