@@ -1,6 +1,6 @@
 # スケジュール調整くん（schedule-relay）
 
-> **本番URL（予定）：https://chosei.takagi.bz**
+> **本番URL（予定）：https://schedule.takagi.bz**
 
 Spir（spirinc.com）の全調整機能と同等以上を満たしつつ、Spirが最高プランでも持たない
 **リレー型（A→B→C と1人ずつ順番に確定）** をマスト機能として備えた、決定論的スケジュール調整ツール「**スケジュール調整くん**」。
