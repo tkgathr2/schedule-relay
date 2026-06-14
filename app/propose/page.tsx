@@ -701,8 +701,8 @@ export default function ProposePage() {
                           );
                         })}
                         {/* 候補ブロック：重なり/隣接する候補を1グループに統合し、
-                            グループは1つの青枠の中に時刻ボタンを縦に並べる。
-                            各時刻ボタンクリックで個別選択/解除（積み重なりを解消）。 */}
+                            Spirと同じく「空き時間帯全体を1つの大きな青枠」として描画。
+                            枠全体クリックでグループ内の全slotを一括選択/解除。 */}
                         {(() => {
                           const sortedCand = [...cand].sort((a, b) => a.start - b.start);
                           const groups: { start: number; end: number; slots: typeof sortedCand }[] = [];
@@ -719,32 +719,33 @@ export default function ProposePage() {
                             const top = msToTopPx(g.start, d.ymd);
                             const height = durationMsToHeightPx(g.start, g.end, d.ymd);
                             if (height <= 0) return null;
+                            const onCount = g.slots.filter((s) => selectedSlots.has(s.idx)).length;
+                            const allOn = onCount === g.slots.length;
+                            const startStr = new Date(g.start).toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
+                            const endStr = new Date(g.end).toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
+                            const handleClick = () => {
+                              setSelectedSlots((prev) => {
+                                const next = new Set(prev);
+                                if (allOn) {
+                                  for (const s of g.slots) next.delete(s.idx);
+                                } else {
+                                  for (const s of g.slots) next.add(s.idx);
+                                }
+                                return next;
+                              });
+                            };
                             return (
-                              <div
+                              <button
                                 key={`cg${gi}`}
-                                className="pp-cal-cand-group"
+                                type="button"
+                                className={`pp-cal-cand ${allOn ? 'on' : ''}`}
                                 style={{ top, height }}
+                                onClick={handleClick}
+                                title={`${startStr}-${endStr}`}
                               >
-                                <div className="pp-cal-cand-group-head">候補 {g.slots.length}件</div>
-                                <div className="pp-cal-cand-picks">
-                                  {g.slots.map((s) => {
-                                    const on = selectedSlots.has(s.idx);
-                                    const ss = new Date(s.start).toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
-                                    const se = new Date(s.end).toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
-                                    return (
-                                      <button
-                                        key={s.idx}
-                                        type="button"
-                                        className={`pp-cal-cand-pick ${on ? 'on' : ''}`}
-                                        onClick={() => toggleSlot(s.idx)}
-                                        title={`${ss}-${se}`}
-                                      >
-                                        {ss}-{se}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              </div>
+                                <div className="pp-cal-cand-label">候補</div>
+                                <div className="pp-cal-cand-time">{startStr}-{endStr}</div>
+                              </button>
                             );
                           });
                         })()}
