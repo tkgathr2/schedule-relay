@@ -174,6 +174,18 @@ export default function ProposePage() {
   // 週ナビ：表示開始週（月曜・JST ms）
   // 初期表示は「期間開始日が含まれる週」（今日の週がまだ期間に入っていない場合の白紙画面を避ける）
   const [viewWeekStart, setViewWeekStart] = useState<number>(() => startOfWeekJst(jstDateMs(plusDaysIso(1))));
+  // 表示モード（Spirと同じ：1日／3日／1週間切替）
+  const [viewMode, setViewMode] = useState<'day' | '3days' | 'week'>('week');
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem('schedule-relay:propose-view-mode');
+      if (v === 'day' || v === '3days' || v === 'week') setViewMode(v);
+    } catch { /* noop */ }
+  }, []);
+  useEffect(() => {
+    try { localStorage.setItem('schedule-relay:propose-view-mode', viewMode); } catch { /* noop */ }
+  }, [viewMode]);
+  const daysToShow = viewMode === 'day' ? 1 : viewMode === '3days' ? 3 : 7;
   // periodStart が変わったら、表示週もその週に追従（期間外を見続ける白紙状態を防ぐ）
   useEffect(() => {
     setViewWeekStart(startOfWeekJst(jstDateMs(periodStart)));
@@ -408,7 +420,7 @@ export default function ProposePage() {
     const todayYmd = msToJstYmd(Date.now());
     const periodStartMs = jstDateMs(periodStart);
     const periodEndMs = jstDateMs(periodEnd);
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; i < daysToShow; i++) {
       const ms = addDays(viewWeekStart, i);
       const ymd = msToJstYmd(ms);
       const dowJa = new Intl.DateTimeFormat('ja-JP', { timeZone: TZ, weekday: 'short' }).format(new Date(ms));
@@ -423,7 +435,7 @@ export default function ProposePage() {
       });
     }
     return out;
-  }, [viewWeekStart, periodStart, periodEnd]);
+  }, [viewWeekStart, periodStart, periodEnd, daysToShow]);
 
   // 表示月（先頭日の月）
   const viewMonthLabel = useMemo(() => {
@@ -653,17 +665,22 @@ export default function ProposePage() {
           <section className="pp-right">
             <div className="pp-cal-wrap">
               <div className="pp-cal-nav">
-                <button className="pp-cal-today" onClick={() => setViewWeekStart(startOfWeekJst(Date.now()))}>今日</button>
-                <button className="pp-cal-arrow" onClick={() => setViewWeekStart((v) => addDays(v, -7))} aria-label="前の週">&lt;</button>
-                <button className="pp-cal-arrow" onClick={() => setViewWeekStart((v) => addDays(v, 7))} aria-label="次の週">&gt;</button>
+                <button className="pp-cal-today" onClick={() => setViewWeekStart(viewMode === 'week' ? startOfWeekJst(Date.now()) : jstDateMs(todayIso()))}>今日</button>
+                <button className="pp-cal-arrow" onClick={() => setViewWeekStart((v) => addDays(v, -daysToShow))} aria-label="前へ">&lt;</button>
+                <button className="pp-cal-arrow" onClick={() => setViewWeekStart((v) => addDays(v, daysToShow))} aria-label="次へ">&gt;</button>
                 <span className="pp-cal-month">{viewMonthLabel}</span>
+                <div className="pp-cal-viewmode" role="tablist" aria-label="表示モード">
+                  <button className={viewMode === 'day' ? 'on' : ''} onClick={() => setViewMode('day')} role="tab">1日</button>
+                  <button className={viewMode === '3days' ? 'on' : ''} onClick={() => setViewMode('3days')} role="tab">3日</button>
+                  <button className={viewMode === 'week' ? 'on' : ''} onClick={() => setViewMode('week')} role="tab">週</button>
+                </div>
                 <span className="pp-cal-spacer" />
                 {slots.length > 0 && (
                   <span className="pp-cal-count">候補 {selectedSlots.size}/{slots.length} 件</span>
                 )}
               </div>
 
-              <div className="pp-cal-grid" role="grid" aria-label="週カレンダー">
+              <div className={`pp-cal-grid${viewMode === 'day' ? ' day' : viewMode === '3days' ? ' days3' : ''}`} role="grid" aria-label="カレンダー">
                 {/* ヘッダ行 */}
                 <div className="pp-cal-head">
                   <div className="pp-cal-head-cell pp-cal-head-time" />
