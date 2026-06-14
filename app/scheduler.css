@@ -200,20 +200,20 @@
 .pp-cal-day-hour { height: 60px; box-sizing: border-box; border-bottom: 1px solid #f3f4f6; }
 
 /* 既存予定ブロック（カレンダー色） */
-/* 既存予定（Spir寄せ：薄いパステル背景に濃い目の文字、塗りつぶしを控えめに） */
+/* 既存予定（Spir「候補抽出モード」と同じく薄パステル＋柔らかい色文字） */
 .pp-cal-busy { position: absolute; left: 2px; right: 2px; border-radius: 4px; padding: 3px 5px; box-sizing: border-box;
-  font-size: 11px; line-height: 1.25; overflow: hidden; color: #374151; opacity: 1;
-  border: 1px solid rgba(0,0,0,0.04); cursor: default; }
+  font-size: 11px; line-height: 1.25; overflow: hidden; color: #4b5563; opacity: 0.85;
+  border: none; cursor: default; }
 .pp-cal-busy .pp-cal-busy-title { font-weight: 600; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
-.pp-cal-busy .pp-cal-busy-time { font-size: 10px; opacity: 0.7; }
+.pp-cal-busy .pp-cal-busy-time { font-size: 10px; opacity: 0.65; }
 
-/* 候補ブロック（Spir寄せ：白背景 + 濃い青の太い点線・既存予定と全く異なる見た目） */
-.pp-cal-cand { position: absolute; left: 4px; right: 4px; border: 2.5px dashed #2563eb; border-radius: 6px;
-  background: #ffffff; padding: 3px 6px; box-sizing: border-box;
-  font-size: 11px; line-height: 1.25; color: #1d4ed8; cursor: pointer; transition: background .12s, border-color .12s, box-shadow .12s;
-  z-index: 5; box-shadow: 0 1px 4px rgba(37, 99, 235, 0.10); }
-.pp-cal-cand:hover { background: #eff6ff; box-shadow: 0 2px 8px rgba(37, 99, 235, 0.20); }
-.pp-cal-cand.on { background: #dbeafe; color: #1e3a8a; border-color: #1d4ed8; box-shadow: 0 2px 10px rgba(37, 99, 235, 0.28); }
+/* 候補ブロック（Spirと同じ：色なし・shadowなし・青点線とラベルだけ） */
+.pp-cal-cand { position: absolute; left: 4px; right: 4px; border: 1.5px dashed #2563eb; border-radius: 4px;
+  background: transparent; padding: 3px 6px; box-sizing: border-box;
+  font-size: 11px; line-height: 1.25; color: #2563eb; cursor: pointer; transition: background .1s;
+  z-index: 5; }
+.pp-cal-cand:hover { background: rgba(37, 99, 235, 0.04); }
+.pp-cal-cand.on { background: rgba(37, 99, 235, 0.10); border-style: solid; border-color: #1d4ed8; color: #1e3a8a; }
 .pp-cal-cand .pp-cal-cand-label { font-weight: 700; font-size: 10px; letter-spacing: 0.3px; }
 .pp-cal-cand .pp-cal-cand-time { font-size: 11px; font-weight: 600; }
 
