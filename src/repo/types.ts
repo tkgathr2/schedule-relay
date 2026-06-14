@@ -8,7 +8,7 @@
  *  - in-memory＝createActiveHold 内で「同一 resourceId・active・半開区間が重なる」Hold を検出し
  *    ConflictHoldError を投げることで同じ不変条件を保証する。
  */
-import type { AdjustmentType, EpochMs, Interval, Slot } from '../domain/types.js';
+import type { AdjustmentType, EpochMs, Interval, RelaySubMode, Slot } from '../domain/types.js';
 
 export interface BookingPageRec {
   id: string;
@@ -152,4 +152,79 @@ export interface Repository {
    * 動的な空き算出で busy として差し引くことで、取られた枠が即座に空きから消える。
    */
   listBlockingIntervals(resourceId: string, now: EpochMs): Promise<Interval[]>;
+
+  // ---------- T3 投票型 ----------
+  /**
+   * 投票用候補を追加（無ければ作る）。同一 (eventId, slot) は再利用＝upsertCandidate と同じ正規化。
+   * T3 投票では「投票対象として明示的に並べる」用途で使う（upsertCandidate と同一実装でよい）。
+   */
+  addCandidate(eventId: string, slot: Slot): Promise<CandidateRec>;
+  /** イベントの候補一覧（start 昇順）。 */
+  listCandidates(eventId: string): Promise<CandidateRec[]>;
+  /**
+   * 投票を記録する（一意：同一 (eventId, candidateId, voterId) は1件）。
+   * 既存があれば no-op（重複投票は無視）。
+   */
+  castVote(eventId: string, candidateId: string, voterId: string): Promise<VoteRec>;
+  /** 候補別の集計（得票数）。投票無し候補は count=0 で返す。 */
+  tallyVotes(eventId: string): Promise<VoteTally[]>;
+
+  // ---------- T6 リレー型 ----------
+  /**
+   * リレーのステップ列を一括作成（既存があれば置換せず例外）。order は 0 始まり。
+   * subMode はステップ単位で異なってもよい（仕様の柔軟性のため）が、運用は同一を想定。
+   */
+  createRelaySteps(eventId: string, steps: CreateRelayStepInput[]): Promise<RelayStepRec[]>;
+  /** イベントのステップ列（order 昇順）。 */
+  getRelaySteps(eventId: string): Promise<RelayStepRec[]>;
+  /**
+   * 現在 active のステップを done にして slot を記録し、次の waiting を active に進める。
+   * 引数 stepId が現在 active と一致しなければ何もせず null を返す（楽観ロック相当）。
+   */
+  advanceRelay(eventId: string, stepId: string, confirmedSlot: Slot): Promise<RelayStepRec[] | null>;
+  /**
+   * 指定ステップを done → active に戻し、それ以降の done/active を waiting に戻す（差し戻し）。
+   * 監査用に audit ログを残せる場所だが、最小実装ではステップ状態のみ更新。
+   */
+  rollbackRelay(eventId: string, stepId: string): Promise<RelayStepRec[] | null>;
+}
+
+// ---------- T3 投票型 型 ----------
+
+export interface VoteRec {
+  id: string;
+  eventId: string;
+  candidateId: string;
+  voterId: string;
+  createdAt: EpochMs;
+}
+
+/** 候補別の集計結果（タイブレーク前の生データ）。 */
+export interface VoteTally {
+  candidate: CandidateRec;
+  count: number;
+}
+
+// ---------- T6 リレー型 型 ----------
+
+export type RelayStepStatus = 'waiting' | 'active' | 'done' | 'skipped';
+
+export interface RelayStepRec {
+  id: string;
+  eventId: string;
+  order: number;
+  assigneeId: string;
+  subMode: RelaySubMode;
+  status: RelayStepStatus;
+  deadline: EpochMs | null;
+  /** done の時に確定した枠（converge ではこの値が後続の強制候補になる）。 */
+  slotStart: EpochMs | null;
+  slotEnd: EpochMs | null;
+}
+
+export interface CreateRelayStepInput {
+  order: number;
+  assigneeId: string;
+  subMode: RelaySubMode;
+  deadline?: EpochMs | null;
 }

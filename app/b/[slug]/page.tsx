@@ -59,9 +59,13 @@ export default function BookingPage({ params }: { params: Promise<{ slug: string
   const [picked, setPicked] = useState<Slot | null>(null);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [done, setDone] = useState<{ slot: Slot } | null>(null);
+  const [done, setDone] = useState<{ slot: Slot; meetUrl?: string | null; calendarEventLink?: string | null } | null>(null);
+
+  const emailValid = /.+@.+/.test(email.trim());
+  const canSubmit = !!picked && name.trim().length > 0 && emailValid;
 
   const [jumped, setJumped] = useState(false);
 
@@ -133,7 +137,8 @@ export default function BookingPage({ params }: { params: Promise<{ slug: string
   const weekHasSlots = days.some((d) => (slotsByDay[d.key] || []).length > 0);
 
   async function confirm() {
-    if (!picked || !name.trim() || !email.trim()) return;
+    if (!picked || !name.trim()) return;
+    if (!emailValid) { setErr('メールアドレスの形式が正しくありません'); return; }
     setBusy(true); setErr(null);
     try {
       const idem = `${slug}-${email}-${picked.start}`;
@@ -158,11 +163,15 @@ export default function BookingPage({ params }: { params: Promise<{ slug: string
 
       const cRes = await fetch(`/api/events/${eventId}/confirm`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ holdId: h.hold.id, participantId: email.trim(), formAnswers: { name: name.trim(), email: email.trim() } }),
+        body: JSON.stringify({
+          holdId: h.hold.id,
+          participantId: email.trim(),
+          formAnswers: { name: name.trim(), email: email.trim(), note: note.trim() },
+        }),
       });
       const c = await cRes.json();
       if (!cRes.ok) throw new Error(c?.error?.message || 'エラー');
-      setDone({ slot: picked });
+      setDone({ slot: picked, meetUrl: c.meetUrl ?? null, calendarEventLink: c.calendarEventLink ?? null });
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'エラーが発生しました');
       // 衝突時は最新の空き状況を取り直す
@@ -200,6 +209,16 @@ export default function BookingPage({ params }: { params: Promise<{ slug: string
               <h3 style={{ margin: '0 0 8px' }}>✅ 予約が確定しました</h3>
               <p style={{ margin: 0 }}><strong>{fmtDate(done.slot.start)} {fmtTime(done.slot.start)}〜{fmtTime(done.slot.end)}</strong></p>
               <p style={{ margin: '8px 0 0', fontSize: 13 }}>{name} 様（{email}）／ {meta?.title}</p>
+              {done.meetUrl && (
+                <p style={{ margin: '12px 0 0', fontSize: 13 }}>
+                  会議URL: <a href={done.meetUrl} target="_blank" rel="noreferrer">{done.meetUrl}</a>
+                </p>
+              )}
+              {done.calendarEventLink && (
+                <p style={{ margin: '4px 0 0', fontSize: 12 }}>
+                  <a href={done.calendarEventLink} target="_blank" rel="noreferrer">Googleカレンダーで開く</a>
+                </p>
+              )}
             </div>
           </div>
         ) : (
@@ -260,11 +279,24 @@ export default function BookingPage({ params }: { params: Promise<{ slug: string
                   </div>
                   <div className="sc-field">
                     <label>メールアドレス<span className="req">*</span></label>
-                    <input className="sc-input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
+                    <input className="sc-input" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
+                    {email.length > 0 && !emailValid && (
+                      <div className="sc-help" style={{ color: '#b91c1c' }}>メール形式が正しくありません</div>
+                    )}
+                  </div>
+                  <div className="sc-field">
+                    <label>一言メモ（任意）</label>
+                    <textarea
+                      className="sc-textarea"
+                      value={note}
+                      onChange={(e) => setNote(e.target.value)}
+                      placeholder="例: 商談の前にこちらの資料を共有しておきます。"
+                      rows={3}
+                    />
                   </div>
                   {err && <div className="sc-err">{err}</div>}
                   <button className="sc-btn primary" style={{ width: '100%', marginTop: 8 }}
-                    disabled={busy || !name.trim() || !email.trim()} onClick={confirm}>
+                    disabled={busy || !canSubmit} onClick={confirm}>
                     {busy ? '確定中…' : 'この日時で予約する'}
                   </button>
                 </>
