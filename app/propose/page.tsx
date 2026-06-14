@@ -172,7 +172,12 @@ export default function ProposePage() {
   const [extractErr, setExtractErr] = useState<string | null>(null);
 
   // 週ナビ：表示開始週（月曜・JST ms）
-  const [viewWeekStart, setViewWeekStart] = useState<number>(() => startOfWeekJst(Date.now()));
+  // 初期表示は「期間開始日が含まれる週」（今日の週がまだ期間に入っていない場合の白紙画面を避ける）
+  const [viewWeekStart, setViewWeekStart] = useState<number>(() => startOfWeekJst(jstDateMs(plusDaysIso(1))));
+  // periodStart が変わったら、表示週もその週に追従（期間外を見続ける白紙状態を防ぐ）
+  useEffect(() => {
+    setViewWeekStart(startOfWeekJst(jstDateMs(periodStart)));
+  }, [periodStart]);
 
   // 反映結果
   const [doneUrl, setDoneUrl] = useState<string | null>(null);

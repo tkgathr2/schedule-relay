@@ -182,7 +182,7 @@
 .pp-cal-body { display: contents; }
 .pp-cal-time { border-left: none; border-bottom: 1px solid #f3f4f6; padding: 2px 6px 0 0; text-align: right; font-size: 11px; color: #6b7280; height: 60px; box-sizing: border-box; }
 .pp-cal-day { position: relative; border-left: 1px solid #f3f4f6; }
-.pp-cal-day.out-of-period { background: rgba(255, 173, 70, 0.15); }
+.pp-cal-day.out-of-period-disabled-old { background: rgba(255, 173, 70, 0.15); }
 .pp-cal-day-hour { height: 60px; box-sizing: border-box; border-bottom: 1px solid #f3f4f6; }
 
 /* 既存予定ブロック（カレンダー色） */
