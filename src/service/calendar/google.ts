@@ -34,6 +34,66 @@ export function googleConfigFromEnv(): GoogleCalendarConfig | null {
 }
 
 /**
+ * 確定時に主催者カレンダーへ予定を作成し、Google Meet の会議URLを発行する。
+ * 失敗時は null を返す（degrade-safe：Meet無しでも確定は維持）。
+ * 既存OAuthに `calendar.events` scope が無い場合や API エラー時も null。
+ */
+export interface CreateMeetEventInput {
+  organizerCalendar?: string;
+  summary: string;
+  description?: string;
+  startMs: number;
+  endMs: number;
+  attendees?: string[];
+}
+
+export interface CreateMeetEventResult {
+  meetUrl: string | null;
+  calendarEventLink: string | null;
+  calendarEventId: string | null;
+}
+
+export async function createCalendarEventWithMeet(
+  cfg: GoogleCalendarConfig,
+  input: CreateMeetEventInput,
+): Promise<CreateMeetEventResult | null> {
+  try {
+    const oauth2 = new google.auth.OAuth2(cfg.clientId, cfg.clientSecret);
+    oauth2.setCredentials({ refresh_token: cfg.refreshToken });
+    const cal = google.calendar({ version: 'v3', auth: oauth2 });
+
+    const requestId = `mt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    const res = await cal.events.insert({
+      calendarId: input.organizerCalendar || 'primary',
+      conferenceDataVersion: 1,
+      sendUpdates: 'all',
+      requestBody: {
+        summary: input.summary,
+        description: input.description,
+        start: { dateTime: new Date(input.startMs).toISOString() },
+        end: { dateTime: new Date(input.endMs).toISOString() },
+        attendees: (input.attendees ?? []).filter((e) => !!e).map((email) => ({ email })),
+        conferenceData: {
+          createRequest: {
+            requestId,
+            conferenceSolutionKey: { type: 'hangoutsMeet' },
+          },
+        },
+      },
+    });
+    const data = res.data;
+    const entry = (data.conferenceData?.entryPoints ?? []).find((p) => p.entryPointType === 'video');
+    return {
+      meetUrl: entry?.uri ?? data.hangoutLink ?? null,
+      calendarEventLink: data.htmlLink ?? null,
+      calendarEventId: data.id ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * [timeMinMs, timeMaxMs) の範囲で、対象カレンダーの busy 区間（UTC ms）を返す。
  * 失敗時は [] （degrade-safe）。
  */
