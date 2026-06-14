@@ -700,52 +700,51 @@ export default function ProposePage() {
                             </div>
                           );
                         })}
-                        {/* 候補ブロック：隣接する候補を1ブロックにマージして描画
-                            （例：14:30-15:00 と 15:00-15:30 が連続 → 14:30-15:30 の1ブロック）。
-                            クリックでグループ内の全slotを一括選択/解除。 */}
+                        {/* 候補ブロック：重なり/隣接する候補を1グループに統合し、
+                            グループは1つの青枠の中に時刻ボタンを縦に並べる。
+                            各時刻ボタンクリックで個別選択/解除（積み重なりを解消）。 */}
                         {(() => {
                           const sortedCand = [...cand].sort((a, b) => a.start - b.start);
-                          const groups: { start: number; end: number; idxs: number[] }[] = [];
+                          const groups: { start: number; end: number; slots: typeof sortedCand }[] = [];
                           for (const c of sortedCand) {
                             const last = groups[groups.length - 1];
-                            if (last && last.end === c.start) {
-                              last.end = c.end;
-                              last.idxs.push(c.idx);
+                            if (last && last.end >= c.start) {
+                              last.end = Math.max(last.end, c.end);
+                              last.slots.push(c);
                             } else {
-                              groups.push({ start: c.start, end: c.end, idxs: [c.idx] });
+                              groups.push({ start: c.start, end: c.end, slots: [c] });
                             }
                           }
                           return groups.map((g, gi) => {
                             const top = msToTopPx(g.start, d.ymd);
                             const height = durationMsToHeightPx(g.start, g.end, d.ymd);
                             if (height <= 0) return null;
-                            const onCount = g.idxs.filter((i) => selectedSlots.has(i)).length;
-                            const allOn = onCount === g.idxs.length;
-                            const handleClick = () => {
-                              setSelectedSlots((prev) => {
-                                const next = new Set(prev);
-                                if (allOn) {
-                                  for (const i of g.idxs) next.delete(i);
-                                } else {
-                                  for (const i of g.idxs) next.add(i);
-                                }
-                                return next;
-                              });
-                            };
-                            const startStr = new Date(g.start).toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
-                            const endStr = new Date(g.end).toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
                             return (
-                              <button
+                              <div
                                 key={`cg${gi}`}
-                                type="button"
-                                className={`pp-cal-cand ${allOn ? 'on' : ''}`}
+                                className="pp-cal-cand-group"
                                 style={{ top, height }}
-                                onClick={handleClick}
-                                title={`${startStr}-${endStr}（${g.idxs.length}枠）`}
                               >
-                                <div className="pp-cal-cand-label">候補{g.idxs.length > 1 ? `（${g.idxs.length}枠）` : ''}</div>
-                                <div className="pp-cal-cand-time">{startStr}-{endStr}</div>
-                              </button>
+                                <div className="pp-cal-cand-group-head">候補 {g.slots.length}件</div>
+                                <div className="pp-cal-cand-picks">
+                                  {g.slots.map((s) => {
+                                    const on = selectedSlots.has(s.idx);
+                                    const ss = new Date(s.start).toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
+                                    const se = new Date(s.end).toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
+                                    return (
+                                      <button
+                                        key={s.idx}
+                                        type="button"
+                                        className={`pp-cal-cand-pick ${on ? 'on' : ''}`}
+                                        onClick={() => toggleSlot(s.idx)}
+                                        title={`${ss}-${se}`}
+                                      >
+                                        {ss}-{se}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
                             );
                           });
                         })()}
