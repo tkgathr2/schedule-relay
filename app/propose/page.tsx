@@ -656,30 +656,55 @@ export default function ProposePage() {
                             </div>
                           );
                         })}
-                        {/* 候補ブロック */}
-                        {cand.map((c) => {
-                          const top = msToTopPx(c.start, d.ymd);
-                          const height = durationMsToHeightPx(c.start, c.end, d.ymd);
-                          if (height <= 0) return null;
-                          const on = selectedSlots.has(c.idx);
-                          return (
-                            <button
-                              key={`c${c.idx}`}
-                              type="button"
-                              className={`pp-cal-cand ${on ? 'on' : ''}`}
-                              style={{ top, height }}
-                              onClick={() => toggleSlot(c.idx)}
-                              title={`${fmtTimeJa(new Date(c.start).toISOString())}-${fmtTimeJa(new Date(c.end).toISOString())}`}
-                            >
-                              <div className="pp-cal-cand-label">候補</div>
-                              <div className="pp-cal-cand-time">
-                                {new Date(c.start).toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false })}
-                                {'-'}
-                                {new Date(c.end).toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false })}
-                              </div>
-                            </button>
-                          );
-                        })}
+                        {/* 候補ブロック：隣接する候補を1ブロックにマージして描画
+                            （例：14:30-15:00 と 15:00-15:30 が連続 → 14:30-15:30 の1ブロック）。
+                            クリックでグループ内の全slotを一括選択/解除。 */}
+                        {(() => {
+                          const sortedCand = [...cand].sort((a, b) => a.start - b.start);
+                          const groups: { start: number; end: number; idxs: number[] }[] = [];
+                          for (const c of sortedCand) {
+                            const last = groups[groups.length - 1];
+                            if (last && last.end === c.start) {
+                              last.end = c.end;
+                              last.idxs.push(c.idx);
+                            } else {
+                              groups.push({ start: c.start, end: c.end, idxs: [c.idx] });
+                            }
+                          }
+                          return groups.map((g, gi) => {
+                            const top = msToTopPx(g.start, d.ymd);
+                            const height = durationMsToHeightPx(g.start, g.end, d.ymd);
+                            if (height <= 0) return null;
+                            const onCount = g.idxs.filter((i) => selectedSlots.has(i)).length;
+                            const allOn = onCount === g.idxs.length;
+                            const handleClick = () => {
+                              setSelectedSlots((prev) => {
+                                const next = new Set(prev);
+                                if (allOn) {
+                                  for (const i of g.idxs) next.delete(i);
+                                } else {
+                                  for (const i of g.idxs) next.add(i);
+                                }
+                                return next;
+                              });
+                            };
+                            const startStr = new Date(g.start).toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
+                            const endStr = new Date(g.end).toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
+                            return (
+                              <button
+                                key={`cg${gi}`}
+                                type="button"
+                                className={`pp-cal-cand ${allOn ? 'on' : ''}`}
+                                style={{ top, height }}
+                                onClick={handleClick}
+                                title={`${startStr}-${endStr}（${g.idxs.length}枠）`}
+                              >
+                                <div className="pp-cal-cand-label">候補{g.idxs.length > 1 ? `（${g.idxs.length}枠）` : ''}</div>
+                                <div className="pp-cal-cand-time">{startStr}-{endStr}</div>
+                              </button>
+                            );
+                          });
+                        })()}
                       </div>
                     );
                   })}

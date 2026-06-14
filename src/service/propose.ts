@@ -66,7 +66,9 @@ export function proposeSlots(input: ProposeInput): Slot[] {
     bufferBeforeMin: input.bufferBeforeMin ?? 0,
     bufferAfterMin: input.bufferAfterMin ?? 0,
     now: input.periodStart,
-    gridMs: (input.gridMinutes ?? 15) * 60 * 1000,
+    // 既定gridを打合せ時間と同じに：30分予定なら30分step（14:30,15:00,…）で重複候補ゼロ。
+    // 明示で gridMinutes を渡せば旧来の15分刻み等にも切替可能。
+    gridMs: (input.gridMinutes ?? input.durationMinutes) * 60 * 1000,
   });
   const max = Math.max(1, input.maxSlots ?? 10);
   return slots.slice(0, max);
