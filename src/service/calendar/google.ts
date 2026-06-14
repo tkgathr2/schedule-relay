@@ -185,3 +185,127 @@ export async function googleFreeBusy(
     return [];
   }
 }
+
+/**
+ * カレンダーごとの busy 区間を分けて返す（色分け描画用）。
+ * `googleFreeBusy` がマージするのに対し、こちらは `{[calendarId]: Interval[]}` を返す。
+ * 失敗時は `{}`（degrade-safe）。
+ */
+export async function googleFreeBusyByCalendar(
+  cfg: GoogleCalendarConfig,
+  timeMinMs: number,
+  timeMaxMs: number,
+  calendarIds: string[],
+): Promise<Record<string, Interval[]>> {
+  try {
+    if (!calendarIds || calendarIds.length === 0) return {};
+    const oauth2 = new google.auth.OAuth2(cfg.clientId, cfg.clientSecret);
+    oauth2.setCredentials({ refresh_token: cfg.refreshToken });
+    const cal = google.calendar({ version: 'v3', auth: oauth2 });
+
+    let ids = calendarIds;
+    if (ids.includes('auto')) {
+      const list = await cal.calendarList.list({ maxResults: 250 });
+      const all = (list.data.items ?? [])
+        .map((c) => c.id)
+        .filter((id): id is string => !!id);
+      ids = all.length ? all : ['primary'];
+    }
+
+    const out: Record<string, Interval[]> = {};
+    for (let i = 0; i < ids.length; i += 50) {
+      const chunk = ids.slice(i, i + 50);
+      const res = await cal.freebusy.query({
+        requestBody: {
+          timeMin: new Date(timeMinMs).toISOString(),
+          timeMax: new Date(timeMaxMs).toISOString(),
+          items: chunk.map((id) => ({ id })),
+        },
+      });
+      const cals = res.data.calendars ?? {};
+      for (const key of Object.keys(cals)) {
+        const arr: Interval[] = [];
+        for (const b of cals[key]?.busy ?? []) {
+          if (!b.start || !b.end) continue;
+          const start = Date.parse(b.start);
+          const end = Date.parse(b.end);
+          if (!Number.isNaN(start) && !Number.isNaN(end) && start < end) arr.push({ start, end });
+        }
+        if (arr.length > 0) out[key] = mergeIntervals(arr);
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * 各カレンダーの events.list を叩いて、busy ブロックに重ねる summary（タイトル）を取得する。
+ * freebusy には title が無いため、UI で「朝礼／移動／…」を出すためにこちらを併用する。
+ * 失敗時は `{}`（degrade-safe）。
+ */
+export interface CalendarEventTitle {
+  start: number;
+  end: number;
+  title: string;
+}
+
+export async function googleEventTitlesByCalendar(
+  cfg: GoogleCalendarConfig,
+  timeMinMs: number,
+  timeMaxMs: number,
+  calendarIds: string[],
+): Promise<Record<string, CalendarEventTitle[]>> {
+  try {
+    if (!calendarIds || calendarIds.length === 0) return {};
+    const oauth2 = new google.auth.OAuth2(cfg.clientId, cfg.clientSecret);
+    oauth2.setCredentials({ refresh_token: cfg.refreshToken });
+    const cal = google.calendar({ version: 'v3', auth: oauth2 });
+
+    let ids = calendarIds;
+    if (ids.includes('auto')) {
+      const list = await cal.calendarList.list({ maxResults: 250 });
+      const all = (list.data.items ?? [])
+        .map((c) => c.id)
+        .filter((id): id is string => !!id);
+      ids = all.length ? all : ['primary'];
+    }
+
+    const results = await Promise.all(
+      ids.map(async (id) => {
+        try {
+          const res = await cal.events.list({
+            calendarId: id,
+            timeMin: new Date(timeMinMs).toISOString(),
+            timeMax: new Date(timeMaxMs).toISOString(),
+            singleEvents: true,
+            maxResults: 250,
+            orderBy: 'startTime',
+          });
+          const items = res.data.items ?? [];
+          const arr: CalendarEventTitle[] = [];
+          for (const ev of items) {
+            const sIso = ev.start?.dateTime ?? ev.start?.date;
+            const eIso = ev.end?.dateTime ?? ev.end?.date;
+            if (!sIso || !eIso) continue;
+            const s = Date.parse(sIso);
+            const e = Date.parse(eIso);
+            if (Number.isNaN(s) || Number.isNaN(e) || s >= e) continue;
+            arr.push({ start: s, end: e, title: ev.summary ?? '' });
+          }
+          return [id, arr] as const;
+        } catch {
+          return [id, [] as CalendarEventTitle[]] as const;
+        }
+      }),
+    );
+    const out: Record<string, CalendarEventTitle[]> = {};
+    for (const [id, arr] of results) {
+      if (arr.length > 0) out[id] = arr;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}

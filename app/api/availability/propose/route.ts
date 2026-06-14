@@ -15,7 +15,7 @@
  * env未設定/Google失敗時は busy=[] でdegrade-safe（営業時間ベースの候補を返す）。
  */
 import { NextResponse } from 'next/server';
-import { googleConfigFromEnv, googleFreeBusy } from '@/service/calendar/google';
+import { googleConfigFromEnv, googleFreeBusy, googleFreeBusyByCalendar, googleEventTitlesByCalendar } from '@/service/calendar/google';
 import { proposeSlots } from '@/service/propose';
 import { ServiceError } from '@/service/errors';
 import { jsonError, slotToDto } from '@/service/http';
@@ -55,9 +55,19 @@ export async function POST(req: Request): Promise<NextResponse> {
 
     // Googleカレンダー連携（env設定済み＆カレンダー選択あり）→ busy取得。失敗時は[]。
     let busy: { start: number; end: number }[] = [];
+    let busyByCalendar: Record<string, { start: number; end: number }[]> = {};
+    let titlesByCalendar: Record<string, { start: number; end: number; title: string }[]> = {};
     const cfg = googleConfigFromEnv();
     if (cfg && calendarIds.length > 0) {
-      busy = await googleFreeBusy(cfg, periodStart, periodEnd, { calendarIds });
+      // freebusy（マージ版）／freebusy（カレンダーごと）／events.list（タイトル）を並列実行
+      const [merged, byCal, titles] = await Promise.all([
+        googleFreeBusy(cfg, periodStart, periodEnd, { calendarIds }),
+        googleFreeBusyByCalendar(cfg, periodStart, periodEnd, calendarIds),
+        googleEventTitlesByCalendar(cfg, periodStart, periodEnd, calendarIds),
+      ]);
+      busy = merged;
+      busyByCalendar = byCal;
+      titlesByCalendar = titles;
     }
 
     const slots = proposeSlots({
@@ -73,9 +83,27 @@ export async function POST(req: Request): Promise<NextResponse> {
       busy,
     });
 
+    // busyByCalendar に title を重ねる：busy 区間と重なる events.list の summary を持ってくる。
+    // events.list の方が rich（title 付き）なので、busy 単独区間より優先で title を埋める。
+    const busyByCalendarDto: Record<string, { start: string; end: string; title?: string }[]> = {};
+    for (const calId of Object.keys(busyByCalendar)) {
+      const intervals = busyByCalendar[calId] ?? [];
+      const titles = titlesByCalendar[calId] ?? [];
+      busyByCalendarDto[calId] = intervals.map((iv) => {
+        const hit = titles.find((t) => t.start < iv.end && t.end > iv.start);
+        const dto: { start: string; end: string; title?: string } = {
+          start: new Date(iv.start).toISOString(),
+          end: new Date(iv.end).toISOString(),
+        };
+        if (hit && hit.title) dto.title = hit.title;
+        return dto;
+      });
+    }
+
     return NextResponse.json({
       slots: slots.map(slotToDto),
       busy: busy.map(slotToDto),
+      busyByCalendar: busyByCalendarDto,
       periodStart: new Date(periodStart).toISOString(),
       periodEnd: new Date(periodEnd).toISOString(),
       calendarIds,

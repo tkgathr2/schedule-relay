@@ -3,7 +3,7 @@
  * 認証情報が無い／API失敗時は null/[] を返し、確定/availability が壊れないこと。
  */
 import { describe, it, expect, afterEach } from 'vitest';
-import { createCalendarEventWithMeet, googleConfigFromEnv, googleFreeBusy } from '../google.js';
+import { createCalendarEventWithMeet, googleConfigFromEnv, googleFreeBusy, googleFreeBusyByCalendar, googleEventTitlesByCalendar } from '../google.js';
 
 describe('googleConfigFromEnv', () => {
   const saved = { ...process.env };
@@ -56,4 +56,52 @@ describe('googleFreeBusy (degrade-safe)', () => {
     const res = await googleFreeBusy(cfg, Date.now(), Date.now() + 3600_000);
     expect(res).toEqual([]);
   }, 15000);
+});
+
+describe('googleFreeBusyByCalendar (degrade-safe)', () => {
+  const cfg = {
+    clientId: 'invalid',
+    clientSecret: 'invalid',
+    refreshToken: 'invalid-refresh',
+    calendarIds: ['primary'],
+  };
+
+  it('calendarIds が空なら即 {} を返す（API を叩かない）', async () => {
+    const res = await googleFreeBusyByCalendar(cfg, Date.now(), Date.now() + 3600_000, []);
+    expect(res).toEqual({});
+  });
+
+  it('不正な認証情報でも例外で落ちずに {} を返す', async () => {
+    const res = await googleFreeBusyByCalendar(
+      cfg,
+      Date.now(),
+      Date.now() + 3600_000,
+      ['primary'],
+    );
+    expect(res).toEqual({});
+  }, 15000);
+});
+
+describe('googleEventTitlesByCalendar (degrade-safe)', () => {
+  const cfg = {
+    clientId: 'invalid',
+    clientSecret: 'invalid',
+    refreshToken: 'invalid-refresh',
+    calendarIds: ['primary'],
+  };
+
+  it('calendarIds が空なら即 {} を返す', async () => {
+    const res = await googleEventTitlesByCalendar(cfg, Date.now(), Date.now() + 3600_000, []);
+    expect(res).toEqual({});
+  });
+
+  it('不正な認証情報でも例外で落ちずに {} を返す', async () => {
+    const res = await googleEventTitlesByCalendar(
+      cfg,
+      Date.now(),
+      Date.now() + 3600_000,
+      ['primary'],
+    );
+    expect(res).toEqual({});
+  }, 20000);
 });
