@@ -235,6 +235,21 @@ export default function ProposePage() {
     return periodStart < periodEnd && whStart < whEnd && !extracting;
   }, [title, periodStart, periodEnd, whStart, whEnd, extracting]);
 
+  // 自動抽出：初回ロード後＋設定変更時に自動で候補を抽出（社長指摘
+  // 「候補を自動抽出押さなくても自動で最初から抽出出来る？」）。
+  // debounce 400ms で連続変更時の過剰APIコールを抑制。
+  // extracting中・loadingCals中・canExtract不可・カレンダー連携無効時は何もしない。
+  useEffect(() => {
+    if (loadingCals || extracting || !canExtract) return;
+    const t = setTimeout(() => {
+      // 最新の extract を呼ぶ（依存配列で関数参照は最新が保証される）
+      extract();
+    }, 400);
+    return () => clearTimeout(t);
+    // 設定変更で自動再抽出する依存。selectedCals は Set なのでサイズと内容で監視
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadingCals, periodStart, periodEnd, duration, whStart, whEnd, bufBefore, bufAfter, minNotice, maxSlots, selectedCals]);
+
   // カレンダーID → 色 マップ
   const calColorMap = useMemo(() => {
     const m = new Map<string, string>();
