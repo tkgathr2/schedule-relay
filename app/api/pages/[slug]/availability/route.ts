@@ -5,8 +5,12 @@
 import { NextResponse } from 'next/server';
 import { getMemoryRepository } from '@/repo/memory';
 import { liveAvailabilityForPage, resolveSettings } from '@/service/booking';
+import { googleConfigFromEnv, googleFreeBusy } from '@/service/calendar/google';
 import { ServiceError } from '@/service/errors';
 import { jsonError, slotToDto } from '@/service/http';
+import type { Interval } from '@/domain/types';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 export async function GET(
   req: Request,
@@ -25,8 +29,17 @@ export async function GET(
       if (!Number.isNaN(parsed)) now = parsed;
     }
 
-    const slots = (await liveAvailabilityForPage(repo, page, now)).map(slotToDto);
     const cfg = resolveSettings(page.settings);
+
+    // Googleカレンダー連携（社長要望「僕のカレンダーと同期」）：環境変数で設定済みなら
+    // 主催者の実予定(freebusy)を取得して busy として差し引く。未設定/失敗時は [] でdegrade。
+    let externalBusy: Interval[] = [];
+    const gcfg = googleConfigFromEnv();
+    if (gcfg) {
+      externalBusy = await googleFreeBusy(gcfg, now, now + cfg.horizonDays * DAY_MS);
+    }
+
+    const slots = (await liveAvailabilityForPage(repo, page, now, externalBusy)).map(slotToDto);
     const raw = (page.settings && typeof page.settings === 'object' ? page.settings : {}) as Record<string, unknown>;
     const meta = {
       title: typeof raw.title === 'string' ? raw.title : page.slug,
