@@ -8,7 +8,7 @@
  *  - in-memory＝createActiveHold 内で「同一 resourceId・active・半開区間が重なる」Hold を検出し
  *    ConflictHoldError を投げることで同じ不変条件を保証する。
  */
-import type { AdjustmentType, EpochMs, Slot } from '../domain/types.js';
+import type { AdjustmentType, EpochMs, Interval, Slot } from '../domain/types.js';
 
 export interface BookingPageRec {
   id: string;
@@ -145,4 +145,11 @@ export interface Repository {
 
   /** デバッグ/テスト用：イベントの確定一覧。 */
   listConfirmations(eventId: string): Promise<ConfirmationRec[]>;
+
+  /**
+   * 指定リソース（主催者枠）で「いま枠を塞いでいる」区間を返す。
+   * ＝確定済み（confirmed）＋未失効の active 仮押さえ（EXCLUDE 制約と同じ述語）。
+   * 動的な空き算出で busy として差し引くことで、取られた枠が即座に空きから消える。
+   */
+  listBlockingIntervals(resourceId: string, now: EpochMs): Promise<Interval[]>;
 }

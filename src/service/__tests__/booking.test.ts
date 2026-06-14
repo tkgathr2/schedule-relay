@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { MemoryRepository } from '../../repo/memory.js';
 import {
   availabilityForPage,
+  liveAvailabilityForPage,
   createEventForPage,
   holdSlot,
   confirmHold,
@@ -71,6 +72,44 @@ describe('availability', () => {
       const inside = windows.some((w) => s.start >= w.start && s.end <= w.end);
       expect(inside).toBe(true);
     }
+  });
+});
+
+describe('動的な空き（取られた枠が消える）', () => {
+  let repo: MemoryRepository;
+  beforeEach(() => {
+    repo = new MemoryRepository();
+  });
+
+  it('確定済みの枠は live 空きから消える', async () => {
+    const page = await makePage(repo);
+    const before = await liveAvailabilityForPage(repo, page, NOW);
+    expect(before.some((s) => s.start === SLOT_10.start)).toBe(true);
+
+    const { event } = await createEventForPage(repo, page.slug, 'dyn-1');
+    const { hold } = await holdSlot(repo, event.id, SLOT_10, 'guest-1', NOW);
+    await confirmHold(repo, hold.id, 'guest-1', null, NOW + MIN);
+
+    const after = await liveAvailabilityForPage(repo, page, NOW);
+    expect(after.some((s) => s.start === SLOT_10.start)).toBe(false); // 予約枠は消えた
+    // 予約に重なる枠（09:45-10:15 等）も出せないので総数は減る
+    expect(after.length).toBeLessThan(before.length);
+  });
+
+  it('未失効の仮押さえ中の枠も live 空きから消える（保持中も二重提示しない）', async () => {
+    const page = await makePage(repo);
+    const { event } = await createEventForPage(repo, page.slug, 'dyn-2');
+    await holdSlot(repo, event.id, SLOT_11, 'guest-1', NOW); // 確定せず保持のみ
+    const live = await liveAvailabilityForPage(repo, page, NOW);
+    expect(live.some((s) => s.start === SLOT_11.start)).toBe(false);
+  });
+
+  it('仮押さえがTTLで失効したら枠は live 空きに戻る', async () => {
+    const page = await makePage(repo, { ...baseSettings, hold_ttl_minutes: 15 });
+    const { event } = await createEventForPage(repo, page.slug, 'dyn-3');
+    await holdSlot(repo, event.id, SLOT_11, 'guest-1', NOW); // expiresAt = NOW+15min
+    const after = await liveAvailabilityForPage(repo, page, NOW + 16 * MIN);
+    expect(after.some((s) => s.start === SLOT_11.start)).toBe(true); // 失効で復活
   });
 });
 

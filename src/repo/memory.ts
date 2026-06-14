@@ -190,6 +190,17 @@ export class MemoryRepository implements Repository {
     return [...this.confirmations.values()].filter((c) => c.eventId === eventId);
   }
 
+  async listBlockingIntervals(resourceId: string, now: number): Promise<{ start: number; end: number }[]> {
+    const out: { start: number; end: number }[] = [];
+    for (const h of this.holds.values()) {
+      const blocks =
+        h.resourceId === resourceId &&
+        (h.status === 'confirmed' || (h.status === 'active' && h.expiresAt > now));
+      if (blocks) out.push({ start: h.start, end: h.end });
+    }
+    return out;
+  }
+
   // createdAt 用の時刻。確定/失効の判定は呼び出し側が渡す now を使うため、ここは記録専用。
   private now(): number {
     return Date.now();

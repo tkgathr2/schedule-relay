@@ -4,7 +4,7 @@
  */
 import { NextResponse } from 'next/server';
 import { getMemoryRepository } from '@/repo/memory';
-import { availabilityForPage, resolveSettings } from '@/service/booking';
+import { liveAvailabilityForPage, resolveSettings } from '@/service/booking';
 import { ServiceError } from '@/service/errors';
 import { jsonError, slotToDto } from '@/service/http';
 
@@ -25,7 +25,7 @@ export async function GET(
       if (!Number.isNaN(parsed)) now = parsed;
     }
 
-    const slots = availabilityForPage(page, now).map(slotToDto);
+    const slots = (await liveAvailabilityForPage(repo, page, now)).map(slotToDto);
     const cfg = resolveSettings(page.settings);
     const raw = (page.settings && typeof page.settings === 'object' ? page.settings : {}) as Record<string, unknown>;
     const meta = {

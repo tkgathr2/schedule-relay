@@ -91,6 +91,34 @@ export default function BookingPage({ params }: { params: Promise<{ slug: string
 
   useEffect(() => { load(); }, [load]);
 
+  // 随時更新：空き枠を静かに取り直す（ローディング表示なし・週位置や選択は維持）
+  const refresh = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/pages/${slug}/availability`, { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      setMeta(data.meta);
+      setSlots(data.slots || []);
+    } catch { /* 一時的な失敗は無視（次の周期で再取得） */ }
+  }, [slug]);
+
+  // 15秒ごと＋画面に戻ってきた時に最新化（誰かが取った枠が消える）
+  useEffect(() => {
+    if (notFound || done) return;
+    const tick = () => { if (typeof document !== 'undefined' && document.visibilityState === 'visible') refresh(); };
+    const id = setInterval(tick, 15000);
+    document.addEventListener('visibilitychange', tick);
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', tick); };
+  }, [refresh, notFound, done]);
+
+  // 選択中の枠が更新で消えた＝他の人に取られた → 選択解除して知らせる
+  useEffect(() => {
+    if (picked && !slots.some((s) => s.start === picked.start && s.end === picked.end)) {
+      setPicked(null);
+      setErr('選択していた枠は、ちょうど他の方が予約しました。空いている別の枠をお選びください。');
+    }
+  }, [slots, picked]);
+
   const days = useMemo(() => weekDays(week), [week]);
   const slotsByDay = useMemo(() => {
     const m: Record<string, Slot[]> = {};
