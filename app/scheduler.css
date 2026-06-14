@@ -116,3 +116,27 @@
 .sc-link input { flex: 1; border: 1px solid var(--sc-line); border-radius: 8px; padding: 9px 11px; font-size: 13px; background: #fff; }
 .sc-toast { font-size: 12px; color: #047857; margin-top: 6px; }
 .sc-err { color: #dc2626; font-size: 12.5px; margin-top: 8px; }
+
+/* ---- /propose ：候補を自動抽出（Spir風3カラム） ---- */
+.sc-propose { display: grid; grid-template-columns: 360px 1fr 1fr; gap: 16px; padding: 20px; max-width: 1280px; margin: 0 auto; }
+.sc-propose > .pp-left,
+.sc-propose > .pp-mid,
+.sc-propose > .pp-right { background: #fff; border: 1px solid var(--sc-line); border-radius: 14px; padding: 20px; }
+.sc-propose h2 { font-size: 17px; margin: 0 0 4px; }
+.sc-propose h3 { font-size: 14px; margin: 0 0 8px; }
+.sc-propose .lead { color: var(--sc-sub); font-size: 12.5px; margin: 0 0 14px; }
+@media (max-width: 1080px){ .sc-propose { grid-template-columns: 1fr; } }
+
+.pp-callist { display: flex; flex-direction: column; gap: 6px; max-height: 540px; overflow: auto; }
+.pp-calitem { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid #e5e7eb; border-radius: 8px; cursor: pointer; font-size: 13px; background: #fafafa; }
+.pp-calitem.on { background: #eef2ff; border-color: #c7d2fe; }
+.pp-calitem .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.pp-calitem .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pp-calitem input[type=checkbox] { width: 16px; height: 16px; cursor: pointer; }
+.pp-x { background: transparent; border: none; color: #6b7280; cursor: pointer; font-size: 16px; line-height: 1; padding: 0 4px; }
+.pp-x:hover { color: #dc2626; }
+
+.pp-slots { display: flex; flex-direction: column; gap: 6px; max-height: 540px; overflow: auto; }
+.pp-slot { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid #e5e7eb; border-radius: 8px; cursor: pointer; font-size: 13px; background: #fafafa; font-family: 'Hiragino Kaku Gothic ProN', 'Yu Gothic', sans-serif; }
+.pp-slot.on { background: #ecfdf5; border-color: #6ee7b7; color: #065f46; font-weight: 600; }
+.pp-slot input[type=checkbox] { width: 16px; height: 16px; cursor: pointer; }
