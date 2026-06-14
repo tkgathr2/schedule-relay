@@ -3,8 +3,25 @@
  * 空き時間リンク 作成画面（Spir の availability-sharing/create を研究して再現）。
  * 左＝設定フォーム／右＝週カレンダーで受付時間帯をプレビュー。保存で公開リンク発行。
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import '../scheduler.css';
+
+const TZ = 'Asia/Tokyo';
+
+function fmtSlotJa(startIso: string, endIso: string): string {
+  const s = new Date(startIso);
+  const e = new Date(endIso);
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: TZ, month: '2-digit', day: '2-digit',
+  }).formatToParts(s);
+  const obj = Object.fromEntries(parts.map((p) => [p.type, p.value]));
+  const m = Number(obj.month);
+  const d = Number(obj.day);
+  const dowJa = new Intl.DateTimeFormat('ja-JP', { timeZone: TZ, weekday: 'short' }).format(s);
+  const sh = s.toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
+  const eh = e.toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
+  return `・${m}/${d}（${dowJa}）${sh}-${eh}`;
+}
 
 const WEEK = ['月', '火', '水', '木', '金', '土', '日'];
 const HOURS = Array.from({ length: 13 }, (_, i) => 8 + i); // 8:00–20:00
@@ -125,6 +142,7 @@ export default function CreatePage() {
             <a className="sc-btn primary" style={{ textDecoration: 'none', display: 'inline-block' }} href={doneUrl}>予約ページを開く</a>
             <a className="sc-btn ghost" style={{ textDecoration: 'none', display: 'inline-block' }} href="/create" onClick={() => location.reload()}>もう1つ作る</a>
           </div>
+          <SlotsTextExport slug={slug.trim()} />
         </div>
       ) : (
         <div className="sc-split">
@@ -252,6 +270,80 @@ export default function CreatePage() {
             </button>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * ④ 候補をテキストでコピー（Spir定番機能）。
+ * 作成したページのslugから availability を取り、最初の10枠を「・6/15（月）9:00-9:30」形式に整形してクリップボードへ。
+ * TZは Asia/Tokyo 固定（後で TZ 自動判定タスクで切替）。
+ */
+function SlotsTextExport({ slug }: { slug: string }) {
+  const [text, setText] = useState<string>('');
+  const [loading, setLoading] = useState(true);
+  const [copied, setCopied] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      setLoading(true); setErr(null);
+      try {
+        const res = await fetch(`/api/pages/${slug}/availability`);
+        if (!res.ok) throw new Error('空き枠の取得に失敗しました');
+        const data = await res.json();
+        const slots: { start: string; end: string }[] = data.slots ?? [];
+        if (!alive) return;
+        if (slots.length === 0) {
+          setText('（直近の空き枠はありません。受付期間や受付時間帯をご確認ください）');
+        } else {
+          const lines = slots.slice(0, 10).map((s) => fmtSlotJa(s.start, s.end));
+          setText(lines.join('\n'));
+        }
+      } catch (e) {
+        if (alive) setErr(e instanceof Error ? e.message : 'エラー');
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, [slug]);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch { /* noop */ }
+  };
+
+  return (
+    <div style={{ marginTop: 24, padding: 16, border: '1px solid #e5e7eb', borderRadius: 10, background: '#fafafa' }}>
+      <h4 style={{ margin: '0 0 8px', fontSize: 14 }}>テキスト形式で候補を出力</h4>
+      <p style={{ margin: '0 0 10px', fontSize: 12, color: '#6b7280' }}>
+        メール本文・チャットに貼り付け可能。直近10件の空き枠（Asia/Tokyo）。
+      </p>
+      {loading ? (
+        <div style={{ fontSize: 13, color: '#6b7280' }}>読み込み中…</div>
+      ) : err ? (
+        <div style={{ fontSize: 13, color: '#b91c1c' }}>{err}</div>
+      ) : (
+        <>
+          <textarea
+            readOnly
+            value={text}
+            rows={Math.min(11, Math.max(3, text.split('\n').length))}
+            style={{ width: '100%', fontFamily: 'monospace', fontSize: 13, padding: 10, border: '1px solid #d1d5db', borderRadius: 8, background: '#fff', boxSizing: 'border-box', resize: 'vertical' }}
+            onFocus={(e) => e.currentTarget.select()}
+          />
+          <div style={{ marginTop: 8 }}>
+            <button className="sc-btn primary" onClick={copy} disabled={!text}>
+              {copied ? '✓ コピーしました' : 'テキストをコピー'}
+            </button>
+          </div>
+        </>
       )}
     </div>
   );
