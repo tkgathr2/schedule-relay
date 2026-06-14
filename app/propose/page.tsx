@@ -153,6 +153,21 @@ export default function ProposePage() {
   const [slots, setSlots] = useState<SlotDto[]>([]);
   const [busyByCalendar, setBusyByCalendar] = useState<BusyByCalendar>({});
   const [selectedSlots, setSelectedSlots] = useState<Set<number>>(new Set());
+  // 左/中ペインの折りたたみ（カレンダーを最大化したいとき用・localStorage で記憶）
+  const [leftCollapsed, setLeftCollapsed] = useState(false);
+  const [midCollapsed, setMidCollapsed] = useState(false);
+  useEffect(() => {
+    try {
+      setLeftCollapsed(localStorage.getItem('schedule-relay:propose-left-collapsed') === '1');
+      setMidCollapsed(localStorage.getItem('schedule-relay:propose-mid-collapsed') === '1');
+    } catch { /* noop */ }
+  }, []);
+  useEffect(() => {
+    try { localStorage.setItem('schedule-relay:propose-left-collapsed', leftCollapsed ? '1' : '0'); } catch { /* noop */ }
+  }, [leftCollapsed]);
+  useEffect(() => {
+    try { localStorage.setItem('schedule-relay:propose-mid-collapsed', midCollapsed ? '1' : '0'); } catch { /* noop */ }
+  }, [midCollapsed]);
   const [extracting, setExtracting] = useState(false);
   const [extractErr, setExtractErr] = useState<string | null>(null);
 
@@ -477,10 +492,20 @@ export default function ProposePage() {
           </div>
         </div>
       ) : (
-        <div className="sc-propose">
+        <div className={`sc-propose${leftCollapsed ? ' left-collapsed' : ''}${midCollapsed ? ' mid-collapsed' : ''}`}>
           {/* 左ペイン：設定 */}
-          <aside className="pp-left">
-            <h2>候補を自動抽出</h2>
+          <aside className={`pp-left${leftCollapsed ? ' collapsed' : ''}`}>
+            {leftCollapsed ? (
+              <button className="pp-collapse-bar" title="設定を開く" onClick={() => setLeftCollapsed(false)}>
+                <span className="pp-collapse-icon">›</span>
+                <span className="pp-collapse-label">候補を自動抽出</span>
+              </button>
+            ) : (
+              <>
+            <div className="pp-pane-header">
+              <h2 style={{ margin: 0 }}>候補を自動抽出</h2>
+              <button className="pp-collapse-btn" title="閉じる" onClick={() => setLeftCollapsed(true)}>‹</button>
+            </div>
             <p className="lead">期間と打合せ時間を指定すると、あなたのカレンダーの空きから候補を自動で抽出します。</p>
 
             <div className="sc-field">
@@ -549,11 +574,23 @@ export default function ProposePage() {
               {extracting ? '抽出中…' : '候補を自動抽出'}
             </button>
             {extractErr && <div className="sc-err" style={{ marginTop: 10 }}>{extractErr}</div>}
+              </>
+            )}
           </aside>
 
           {/* 中ペイン：カレンダー選択 */}
-          <section className="pp-mid">
-            <h3>予定を考慮するカレンダー</h3>
+          <section className={`pp-mid${midCollapsed ? ' collapsed' : ''}`}>
+            {midCollapsed ? (
+              <button className="pp-collapse-bar" title="カレンダーを開く" onClick={() => setMidCollapsed(false)}>
+                <span className="pp-collapse-icon">›</span>
+                <span className="pp-collapse-label">予定を考慮するカレンダー</span>
+              </button>
+            ) : (
+              <>
+              <div className="pp-pane-header">
+                <h2 style={{ margin: 0 }}>予定を考慮するカレンダー</h2>
+                <button className="pp-collapse-btn" title="閉じる" onClick={() => setMidCollapsed(true)}>‹</button>
+              </div>
             <p className="lead">チェックを入れたカレンダーの予定を「埋まっている時間」として除外します。</p>
             {loadingCals ? (
               <div style={{ fontSize: 13, color: '#6b7280' }}>読み込み中…</div>
@@ -586,6 +623,8 @@ export default function ProposePage() {
                 <div style={{ marginTop: 10, fontSize: 12, color: '#6b7280' }}>
                   選択中: {selectedCals.size} / {calendars.length} カレンダー
                 </div>
+              </>
+            )}
               </>
             )}
           </section>
