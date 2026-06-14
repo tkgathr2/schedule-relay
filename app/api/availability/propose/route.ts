@@ -1,0 +1,86 @@
+/**
+ * POST /api/availability/propose — Spirの「候補を自動抽出」相当。
+ * body:
+ *   {
+ *     calendarIds: string[],               // 予定を考慮するGoogleカレンダーID（複数）
+ *     periodStart: ISO|ms, periodEnd: ISO|ms,
+ *     durationMinutes: number,             // 15/30/45/60/90/120
+ *     gridMinutes?: number,                // 既定15
+ *     workingHours?: WorkingHours,         // 未指定なら平日09-18 JST
+ *     bufferBeforeMin?, bufferAfterMin?, minNoticeMin?,
+ *     maxSlots?: number                    // 既定10
+ *   }
+ * 応答: { slots: [{start, end}], busy: [{start,end}], periodStart, periodEnd }
+ *
+ * env未設定/Google失敗時は busy=[] でdegrade-safe（営業時間ベースの候補を返す）。
+ */
+import { NextResponse } from 'next/server';
+import { googleConfigFromEnv, googleFreeBusy } from '@/service/calendar/google';
+import { proposeSlots } from '@/service/propose';
+import { ServiceError } from '@/service/errors';
+import { jsonError, slotToDto } from '@/service/http';
+import type { WorkingHours } from '@/domain/working-hours';
+
+function parseTime(v: unknown): number | null {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string') {
+    if (/^\d+$/.test(v)) return Number(v);
+    const t = Date.parse(v);
+    if (!Number.isNaN(t)) return t;
+  }
+  return null;
+}
+
+export async function POST(req: Request): Promise<NextResponse> {
+  try {
+    const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!body) throw new ServiceError('VALIDATION', 'JSON ボディが必要です');
+
+    const periodStart = parseTime(body.periodStart);
+    const periodEnd = parseTime(body.periodEnd);
+    if (periodStart === null) throw new ServiceError('VALIDATION', 'periodStart が不正です');
+    if (periodEnd === null) throw new ServiceError('VALIDATION', 'periodEnd が不正です');
+    if (periodEnd <= periodStart) throw new ServiceError('VALIDATION', 'periodEnd は periodStart より後である必要があります');
+
+    const duration = Number(body.durationMinutes);
+    if (!Number.isFinite(duration) || duration < 1 || duration > 24 * 60) {
+      throw new ServiceError('VALIDATION', 'durationMinutes が不正です');
+    }
+
+    const calendarIds = Array.isArray(body.calendarIds)
+      ? body.calendarIds.filter((v): v is string => typeof v === 'string' && v.length > 0)
+      : [];
+
+    const workingHours = body.workingHours as WorkingHours | undefined;
+
+    // Googleカレンダー連携（env設定済み＆カレンダー選択あり）→ busy取得。失敗時は[]。
+    let busy: { start: number; end: number }[] = [];
+    const cfg = googleConfigFromEnv();
+    if (cfg && calendarIds.length > 0) {
+      busy = await googleFreeBusy(cfg, periodStart, periodEnd, { calendarIds });
+    }
+
+    const slots = proposeSlots({
+      periodStart,
+      periodEnd,
+      durationMinutes: duration,
+      gridMinutes: typeof body.gridMinutes === 'number' ? body.gridMinutes : 15,
+      workingHours,
+      bufferBeforeMin: typeof body.bufferBeforeMin === 'number' ? body.bufferBeforeMin : 0,
+      bufferAfterMin: typeof body.bufferAfterMin === 'number' ? body.bufferAfterMin : 0,
+      minNoticeMin: typeof body.minNoticeMin === 'number' ? body.minNoticeMin : 0,
+      maxSlots: typeof body.maxSlots === 'number' ? body.maxSlots : 10,
+      busy,
+    });
+
+    return NextResponse.json({
+      slots: slots.map(slotToDto),
+      busy: busy.map(slotToDto),
+      periodStart: new Date(periodStart).toISOString(),
+      periodEnd: new Date(periodEnd).toISOString(),
+      calendarIds,
+    });
+  } catch (e) {
+    return jsonError(e);
+  }
+}
