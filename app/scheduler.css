@@ -1,0 +1,118 @@
+/* スケジュール調整くん — Spir風 空き時間リンク UI 共有スタイル
+ * Spir(app.spirinc.com)の availability-sharing を研究して再現：
+ *  - 作成画面＝左フォーム＋右週カレンダーの分割ビュー
+ *  - 公開予約ページ＝週カレンダーで空き枠タップ→確定パネル
+ * 配色はブランド色（#2563eb 系）。Spirの落ち着いた青基調に寄せる。 */
+
+:root {
+  --sc-brand: #2563eb;
+  --sc-brand-dark: #1d4ed8;
+  --sc-brand-soft: #eff4ff;
+  --sc-ink: #1f2933;
+  --sc-sub: #6b7280;
+  --sc-line: #e5e7eb;
+  --sc-bg: #f7f8fa;
+  --sc-open: #dbeafe;
+  --sc-open-bd: #93c5fd;
+  --sc-sel: #2563eb;
+  --sc-busy: #eef0f3;
+}
+
+* { box-sizing: border-box; }
+
+.sc-wrap { min-height: 100vh; background: var(--sc-bg); color: var(--sc-ink);
+  font-family: -apple-system, "Segoe UI", "Hiragino Kaku Gothic ProN", "Noto Sans JP", Meiryo, sans-serif; }
+
+.sc-topbar { display: flex; align-items: center; gap: 10px; height: 56px; padding: 0 20px;
+  background: #fff; border-bottom: 1px solid var(--sc-line); position: sticky; top: 0; z-index: 20; }
+.sc-logo { font-weight: 800; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+.sc-logo .mk { width: 26px; height: 26px; border-radius: 7px; background: var(--sc-brand);
+  color: #fff; display: grid; place-items: center; font-size: 15px; }
+.sc-spacer { flex: 1; }
+.sc-pill { font-size: 12px; color: var(--sc-sub); background: var(--sc-brand-soft);
+  border: 1px solid var(--sc-open-bd); padding: 4px 10px; border-radius: 999px; }
+
+/* ---- 分割ビュー（作成画面） ---- */
+.sc-split { display: grid; grid-template-columns: 420px 1fr; min-height: calc(100vh - 56px); }
+.sc-form { background: #fff; border-right: 1px solid var(--sc-line); padding: 22px 22px 90px;
+  overflow-y: auto; max-height: calc(100vh - 56px); }
+.sc-form h1 { font-size: 18px; margin: 0 0 4px; }
+.sc-form .lead { color: var(--sc-sub); font-size: 13px; margin: 0 0 18px; }
+.sc-sec { font-size: 13px; font-weight: 700; color: var(--sc-ink); margin: 22px 0 10px;
+  padding-top: 16px; border-top: 1px solid var(--sc-line); }
+.sc-sec:first-of-type { border-top: 0; padding-top: 0; }
+.sc-field { margin-bottom: 14px; }
+.sc-field label { display: block; font-size: 12.5px; font-weight: 600; margin-bottom: 6px; }
+.sc-field .req { color: #dc2626; margin-left: 3px; }
+.sc-input, .sc-select, .sc-textarea { width: 100%; border: 1px solid var(--sc-line); border-radius: 9px;
+  padding: 10px 12px; font-size: 14px; background: #fff; color: var(--sc-ink); }
+.sc-input:focus, .sc-select:focus, .sc-textarea:focus { outline: none; border-color: var(--sc-brand);
+  box-shadow: 0 0 0 3px var(--sc-brand-soft); }
+.sc-textarea { resize: vertical; min-height: 70px; }
+.sc-help { font-size: 11.5px; color: var(--sc-sub); margin-top: 5px; }
+.sc-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.sc-seg { display: inline-flex; border: 1px solid var(--sc-line); border-radius: 9px; overflow: hidden; }
+.sc-seg button { border: 0; background: #fff; padding: 8px 14px; font-size: 13px; cursor: pointer; color: var(--sc-sub); }
+.sc-seg button.on { background: var(--sc-brand); color: #fff; }
+
+/* 曜日・時間帯 */
+.sc-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.sc-day { border: 1px solid var(--sc-line); border-radius: 8px; padding: 8px 4px; text-align: center; cursor: pointer; background: #fff; }
+.sc-day .d { font-size: 12px; font-weight: 700; }
+.sc-day .h { font-size: 10px; color: var(--sc-sub); margin-top: 3px; }
+.sc-day.off { background: var(--sc-busy); color: #9ca3af; }
+.sc-day.off .h { color: #b6bcc6; }
+
+/* 保存バー */
+.sc-savebar { position: fixed; bottom: 0; left: 0; width: 420px; background: #fff;
+  border-top: 1px solid var(--sc-line); border-right: 1px solid var(--sc-line);
+  padding: 12px 22px; display: flex; gap: 10px; }
+.sc-btn { border: 0; border-radius: 9px; padding: 11px 18px; font-size: 14px; font-weight: 700; cursor: pointer; }
+.sc-btn.primary { background: var(--sc-brand); color: #fff; flex: 1; }
+.sc-btn.primary:hover { background: var(--sc-brand-dark); }
+.sc-btn.primary:disabled { background: #c3cede; cursor: not-allowed; }
+.sc-btn.ghost { background: #fff; border: 1px solid var(--sc-line); color: var(--sc-ink); }
+
+/* ---- 週カレンダー（プレビュー＆公開） ---- */
+.sc-cal { padding: 18px 22px; overflow-y: auto; max-height: calc(100vh - 56px); }
+.sc-caltool { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.sc-caltool .nav { width: 30px; height: 30px; border: 1px solid var(--sc-line); background: #fff;
+  border-radius: 8px; cursor: pointer; font-size: 14px; }
+.sc-caltool .ttl { font-weight: 700; font-size: 15px; }
+.sc-caltool .tz { margin-left: auto; font-size: 12px; color: var(--sc-sub); }
+.sc-grid { display: grid; grid-template-columns: 52px repeat(7, 1fr); background: #fff;
+  border: 1px solid var(--sc-line); border-radius: 12px; overflow: hidden; }
+.sc-grid .corner { border-bottom: 1px solid var(--sc-line); }
+.sc-dhead { text-align: center; padding: 8px 0; border-bottom: 1px solid var(--sc-line); border-left: 1px solid var(--sc-line); }
+.sc-dhead .dw { font-size: 11px; color: var(--sc-sub); }
+.sc-dhead .dn { font-size: 15px; font-weight: 700; }
+.sc-dhead.today .dn { color: var(--sc-brand); }
+.sc-tcell { font-size: 11px; color: var(--sc-sub); text-align: right; padding: 2px 6px 0 0;
+  border-top: 1px solid #f1f2f4; height: 30px; }
+.sc-cell { border-top: 1px solid #f1f2f4; border-left: 1px solid var(--sc-line); height: 30px; position: relative; }
+.sc-slot { position: absolute; left: 2px; right: 2px; border-radius: 5px; cursor: pointer;
+  background: var(--sc-open); border: 1px solid var(--sc-open-bd); font-size: 10.5px; color: #1e40af;
+  display: flex; align-items: center; justify-content: center; }
+.sc-slot:hover { background: #c7ddff; }
+.sc-slot.sel { background: var(--sc-sel); border-color: var(--sc-sel); color: #fff; font-weight: 700; }
+.sc-legend { display: flex; gap: 16px; margin-top: 12px; font-size: 12px; color: var(--sc-sub); }
+.sc-legend i { display: inline-block; width: 13px; height: 13px; border-radius: 3px; margin-right: 5px; vertical-align: -2px; }
+
+/* ---- 公開予約ページ ---- */
+.sc-pub { max-width: 1100px; margin: 0 auto; padding: 0; }
+.sc-pubhead { background: #fff; border: 1px solid var(--sc-line); border-radius: 14px; padding: 20px 24px; margin: 20px; }
+.sc-pubhead h1 { font-size: 20px; margin: 0 0 6px; }
+.sc-pubhead .meta { color: var(--sc-sub); font-size: 13px; display: flex; gap: 14px; flex-wrap: wrap; }
+.sc-pubgrid { display: grid; grid-template-columns: 1fr 340px; gap: 20px; padding: 0 20px 40px; }
+@media (max-width: 880px){ .sc-split{grid-template-columns:1fr} .sc-pubgrid{grid-template-columns:1fr} .sc-savebar{width:100%} .sc-form{max-height:none} }
+
+.sc-panel { background: #fff; border: 1px solid var(--sc-line); border-radius: 14px; padding: 20px; height: fit-content; position: sticky; top: 76px; }
+.sc-panel h3 { margin: 0 0 4px; font-size: 15px; }
+.sc-chosen { background: var(--sc-brand-soft); border: 1px solid var(--sc-open-bd); border-radius: 9px;
+  padding: 10px 12px; font-size: 13px; margin: 10px 0 14px; }
+.sc-empty { color: var(--sc-sub); font-size: 13px; padding: 30px 0; text-align: center; }
+.sc-done { background: #ecfdf5; border: 1px solid #6ee7b7; color: #065f46; border-radius: 12px; padding: 18px; }
+.sc-link { display: flex; gap: 8px; margin-top: 8px; }
+.sc-link input { flex: 1; border: 1px solid var(--sc-line); border-radius: 8px; padding: 9px 11px; font-size: 13px; background: #fff; }
+.sc-toast { font-size: 12px; color: #047857; margin-top: 6px; }
+.sc-err { color: #dc2626; font-size: 12.5px; margin-top: 8px; }

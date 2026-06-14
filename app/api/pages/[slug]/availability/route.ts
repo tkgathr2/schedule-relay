@@ -4,7 +4,7 @@
  */
 import { NextResponse } from 'next/server';
 import { getMemoryRepository } from '@/repo/memory';
-import { availabilityForPage } from '@/service/booking';
+import { availabilityForPage, resolveSettings } from '@/service/booking';
 import { ServiceError } from '@/service/errors';
 import { jsonError, slotToDto } from '@/service/http';
 
@@ -26,7 +26,16 @@ export async function GET(
     }
 
     const slots = availabilityForPage(page, now).map(slotToDto);
-    return NextResponse.json({ slug, now: new Date(now).toISOString(), slots });
+    const cfg = resolveSettings(page.settings);
+    const raw = (page.settings && typeof page.settings === 'object' ? page.settings : {}) as Record<string, unknown>;
+    const meta = {
+      title: typeof raw.title === 'string' ? raw.title : page.slug,
+      description: typeof raw.description === 'string' ? raw.description : '',
+      durationMin: cfg.durationMin,
+      tz: cfg.workingHours.tz,
+      organizerId: page.organizerId,
+    };
+    return NextResponse.json({ slug, now: new Date(now).toISOString(), meta, slots });
   } catch (e) {
     return jsonError(e);
   }
