@@ -7,7 +7,7 @@
     "dev": "next dev",
     "build": "prisma generate && next build",
     "postinstall": "prisma generate",
-    "db:deploy": "prisma migrate deploy",
+    "db:deploy": "prisma migrate resolve --rolled-back 0001_init 2>/dev/null || true && prisma migrate deploy",
     "start": "npm run db:deploy && next start",
     "test": "vitest run",
     "test:watch": "vitest",

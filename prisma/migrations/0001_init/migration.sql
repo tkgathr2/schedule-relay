@@ -184,13 +184,16 @@ ALTER TABLE "RelayStep" ADD CONSTRAINT "RelayStep_eventId_fkey" FOREIGN KEY ("ev
 ALTER TABLE "Vote" ADD CONSTRAINT "Vote_eventId_fkey" FOREIGN KEY ("eventId") REFERENCES "Event"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 
--- ★ ダブルブッキング物理防止（仕様 §12）：EXCLUDE 制約（GiST + tstzrange &&）
+-- ★ ダブルブッキング物理防止（仕様 §12）：EXCLUDE 制約（GiST + range &&）
+-- NOTE: startAt/endAt は Prisma の DateTime ＝ timestamp(3)（TZ無し・値はUTC）。
+--   tstzrange は timestamptz を要求し型不一致で migration が失敗する（P3009の真因）。
+--   列型に一致する tsrange を使う。保存値はすべてUTC由来なので半開区間 [) の重なり判定は同値。
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 
 ALTER TABLE "Hold"
   ADD CONSTRAINT hold_no_double_booking
   EXCLUDE USING gist (
     "resourceId" WITH =,
-    tstzrange("startAt", "endAt", '[)') WITH &&
+    tsrange("startAt", "endAt", '[)') WITH &&
   )
   WHERE (status IN ('active', 'confirmed'));
