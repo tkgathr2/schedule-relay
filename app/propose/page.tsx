@@ -232,7 +232,7 @@ export default function ProposePage() {
   }, [selectedCals, loadingCals]);
 
   const canExtract = useMemo(() => {
-    return title.trim().length > 0 && periodStart < periodEnd && whStart < whEnd && !extracting;
+    return periodStart < periodEnd && whStart < whEnd && !extracting;
   }, [title, periodStart, periodEnd, whStart, whEnd, extracting]);
 
   // カレンダーID → 色 マップ
@@ -292,7 +292,7 @@ export default function ProposePage() {
     try {
       const slug = randSlug();
       const settings = {
-        title: title.trim(),
+        title: (title.trim() || '日程候補'),
         description: '',
         duration_minutes: duration,
         grid_minutes: 15,
@@ -327,7 +327,7 @@ export default function ProposePage() {
         .map((s) => `・${fmtSlotJa(s.start, s.end)}`);
       setCopyText(
         [
-          `${title.trim()} の候補です。`,
+          `${(title.trim() || '日程候補')} の候補です。`,
           '',
           ...lines,
           '',
@@ -347,7 +347,7 @@ export default function ProposePage() {
             [
               {
                 slug,
-                title: title.trim(),
+                title: (title.trim() || '日程候補'),
                 durationMin: duration,
                 createdAt: new Date().toISOString(),
               },
