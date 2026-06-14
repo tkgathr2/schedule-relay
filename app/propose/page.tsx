@@ -529,8 +529,8 @@ export default function ProposePage() {
             <p className="lead">期間と打合せ時間を指定すると、あなたのカレンダーの空きから候補を自動で抽出します。</p>
 
             <div className="sc-field">
-              <label>タイトル<span className="req">*</span></label>
-              <input className="sc-input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="例: 髙木産業 ご面談" />
+              <label>タイトル<span className="opt">（任意）</span></label>
+              <input className="sc-input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="未入力なら「日程候補」になります" />
             </div>
 
             <div className="sc-field">
