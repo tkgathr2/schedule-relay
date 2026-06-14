@@ -174,10 +174,24 @@ export default function ProposePage() {
         const data = await res.json();
         const cals: Calendar[] = data.calendars ?? [];
         setCalendars(cals);
-        // 既定で primary にチェック
+        // 前回の選択を localStorage から復元（無ければ primary を既定で選択）
         const init = new Set<string>();
-        for (const c of cals) if (c.primary) init.add(c.id);
-        if (init.size === 0 && cals.length > 0) init.add(cals[0]!.id);
+        let restored = false;
+        try {
+          const raw = localStorage.getItem('schedule-relay:propose-calendars');
+          if (raw) {
+            const ids: string[] = JSON.parse(raw);
+            const valid = new Set(cals.map((c) => c.id));
+            for (const id of ids) if (valid.has(id)) init.add(id);
+            if (init.size > 0) restored = true;
+          }
+        } catch {
+          /* 壊れた値は無視 */
+        }
+        if (!restored) {
+          for (const c of cals) if (c.primary) init.add(c.id);
+          if (init.size === 0 && cals.length > 0) init.add(cals[0]!.id);
+        }
         setSelectedCals(init);
       } catch {
         setCalendars([]);
@@ -186,6 +200,16 @@ export default function ProposePage() {
       }
     })();
   }, []);
+
+  // selectedCals が変わるたびに localStorage に保存（次回起動時に自動復元）
+  useEffect(() => {
+    if (loadingCals) return; // 初期ロード中は保存しない
+    try {
+      localStorage.setItem('schedule-relay:propose-calendars', JSON.stringify([...selectedCals]));
+    } catch {
+      /* QuotaExceeded 等は無視 */
+    }
+  }, [selectedCals, loadingCals]);
 
   const canExtract = useMemo(() => {
     return title.trim().length > 0 && periodStart < periodEnd && whStart < whEnd && !extracting;
