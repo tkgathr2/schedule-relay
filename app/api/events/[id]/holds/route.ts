@@ -3,7 +3,7 @@
  * body: { slot: {start,end}, holderId, now? }
  */
 import { NextResponse } from 'next/server';
-import { getMemoryRepository } from '@/repo/memory';
+import { getRepository } from '@/repo/index';
 import { holdSlot } from '@/service/booking';
 import { ServiceError } from '@/service/errors';
 import { jsonError, serverNow, slotFromDto, slotToDto } from '@/service/http';
@@ -24,7 +24,7 @@ export async function POST(
 
     const now = serverNow(body.now);
 
-    const repo = getMemoryRepository();
+    const repo = getRepository();
     const { hold, expiresAt } = await holdSlot(repo, id, slot, holderId, now);
     return NextResponse.json(
       {

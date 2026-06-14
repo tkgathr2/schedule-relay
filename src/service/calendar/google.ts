@@ -25,11 +25,12 @@ export function googleConfigFromEnv(): GoogleCalendarConfig | null {
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
   const refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
   if (!clientId || !clientSecret || !refreshToken) return null;
-  const ids = (process.env.GOOGLE_CALENDAR_IDS || 'primary')
+  // 'auto'（既定）＝主催者の全カレンダーを自動取得して freebusy 対象にする（Spir同様）。
+  const ids = (process.env.GOOGLE_CALENDAR_IDS || 'auto')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
-  return { clientId, clientSecret, refreshToken, calendarIds: ids.length ? ids : ['primary'] };
+  return { clientId, clientSecret, refreshToken, calendarIds: ids.length ? ids : ['auto'] };
 }
 
 /**
@@ -46,22 +47,35 @@ export async function googleFreeBusy(
     oauth2.setCredentials({ refresh_token: cfg.refreshToken });
     const cal = google.calendar({ version: 'v3', auth: oauth2 });
 
-    const res = await cal.freebusy.query({
-      requestBody: {
-        timeMin: new Date(timeMinMs).toISOString(),
-        timeMax: new Date(timeMaxMs).toISOString(),
-        items: cfg.calendarIds.map((id) => ({ id })),
-      },
-    });
+    // 'auto' なら全カレンダーを列挙して対象にする（主催者の予定を漏れなく busy にする）。
+    let ids = cfg.calendarIds;
+    if (ids.includes('auto')) {
+      const list = await cal.calendarList.list({ maxResults: 250 });
+      const all = (list.data.items ?? [])
+        .map((c) => c.id)
+        .filter((id): id is string => !!id);
+      ids = all.length ? all : ['primary'];
+    }
 
-    const cals = res.data.calendars ?? {};
+    // freebusy.query は1回あたり最大50カレンダー。分割して問い合わせる。
     const out: Interval[] = [];
-    for (const key of Object.keys(cals)) {
-      for (const b of cals[key]?.busy ?? []) {
-        if (!b.start || !b.end) continue;
-        const start = Date.parse(b.start);
-        const end = Date.parse(b.end);
-        if (!Number.isNaN(start) && !Number.isNaN(end) && start < end) out.push({ start, end });
+    for (let i = 0; i < ids.length; i += 50) {
+      const chunk = ids.slice(i, i + 50);
+      const res = await cal.freebusy.query({
+        requestBody: {
+          timeMin: new Date(timeMinMs).toISOString(),
+          timeMax: new Date(timeMaxMs).toISOString(),
+          items: chunk.map((id) => ({ id })),
+        },
+      });
+      const cals = res.data.calendars ?? {};
+      for (const key of Object.keys(cals)) {
+        for (const b of cals[key]?.busy ?? []) {
+          if (!b.start || !b.end) continue;
+          const start = Date.parse(b.start);
+          const end = Date.parse(b.end);
+          if (!Number.isNaN(start) && !Number.isNaN(end) && start < end) out.push({ start, end });
+        }
       }
     }
     return mergeIntervals(out);

@@ -84,6 +84,7 @@ model Candidate {
   endAt   DateTime
   holds   Hold[]
 
+  @@unique([eventId, startAt, endAt]) // 同一(event,slot)は1行に正規化（upsert race防止）
   @@index([eventId])
 }
 

@@ -4,7 +4,7 @@
  * body: { slug }
  */
 import { NextResponse } from 'next/server';
-import { getMemoryRepository } from '@/repo/memory';
+import { getRepository } from '@/repo/index';
 import { createEventForPage } from '@/service/booking';
 import { ServiceError } from '@/service/errors';
 import { jsonError } from '@/service/http';
@@ -16,7 +16,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     if (!slug) throw new ServiceError('VALIDATION', 'slug は必須です');
 
     const idempotencyKey = req.headers.get('Idempotency-Key');
-    const repo = getMemoryRepository();
+    const repo = getRepository();
     const { event, reused } = await createEventForPage(repo, slug, idempotencyKey);
     return NextResponse.json({ event, reused }, { status: reused ? 200 : 201 });
   } catch (e) {

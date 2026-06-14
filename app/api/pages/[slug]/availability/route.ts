@@ -3,7 +3,7 @@
  * 任意 query: ?now=<ISO|ms>（テスト/プレビュー用。既定はサーバ現在時刻）。
  */
 import { NextResponse } from 'next/server';
-import { getMemoryRepository } from '@/repo/memory';
+import { getRepository } from '@/repo/index';
 import { liveAvailabilityForPage, resolveSettings } from '@/service/booking';
 import { googleConfigFromEnv, googleFreeBusy } from '@/service/calendar/google';
 import { ServiceError } from '@/service/errors';
@@ -18,7 +18,7 @@ export async function GET(
 ): Promise<NextResponse> {
   try {
     const { slug } = await ctx.params;
-    const repo = getMemoryRepository();
+    const repo = getRepository();
     const page = await repo.getPageBySlug(slug);
     if (!page || !page.isActive) throw new ServiceError('NOT_FOUND', '予約ページが見つかりません');
 

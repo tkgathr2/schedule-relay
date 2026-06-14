@@ -3,7 +3,7 @@
  * body: { organizerId, type, slug, settings }
  */
 import { NextResponse } from 'next/server';
-import { getMemoryRepository } from '@/repo/memory';
+import { getRepository } from '@/repo/index';
 import type { AdjustmentType } from '@/domain/types';
 import { ServiceError } from '@/service/errors';
 import { jsonError } from '@/service/http';
@@ -22,7 +22,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     if (!slug) throw new ServiceError('VALIDATION', 'slug は必須です');
     if (!VALID_TYPES.includes(type)) throw new ServiceError('VALIDATION', 'type が不正です');
 
-    const repo = getMemoryRepository();
+    const repo = getRepository();
     if (await repo.getPageBySlug(slug)) {
       throw new ServiceError('VALIDATION', `slug は既に使われています: ${slug}`);
     }

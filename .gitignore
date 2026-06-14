@@ -11,3 +11,6 @@ coverage/
 # TS incremental build info
 *.tsbuildinfo
 tsconfig.tsbuildinfo
+
+# ローカル一時ツール（OAuth/cert取得・秘密を含みうる）
+/scripts/

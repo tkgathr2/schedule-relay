@@ -4,7 +4,7 @@
  * カレンダー書込・会議URL発行は後続フェーズ（確定レコードのみ作成）。
  */
 import { NextResponse } from 'next/server';
-import { getMemoryRepository } from '@/repo/memory';
+import { getRepository } from '@/repo/index';
 import { confirmHold } from '@/service/booking';
 import { ServiceError } from '@/service/errors';
 import { jsonError, serverNow, slotToDto } from '@/service/http';
@@ -24,7 +24,7 @@ export async function POST(
 
     const now = serverNow(body.now);
 
-    const repo = getMemoryRepository();
+    const repo = getRepository();
     const conf = await confirmHold(repo, holdId, participantId, body.formAnswers, now);
     return NextResponse.json(
       {

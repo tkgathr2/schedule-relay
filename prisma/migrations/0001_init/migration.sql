@@ -1,18 +1,192 @@
--- スケジュール調整ツール 初期マイグレーション
--- ★ ダブルブッキング物理防止（仕様 §12 強化）：
---   単なる UNIQUE ではなく PostgreSQL の EXCLUDE 制約（GiST + tstzrange &&）で
---   「同一リソース × 重なる時間帯」に active な Hold が2つできないことを DB が保証する。
---   半開区間 [start, end) を使うため端点共有は重複扱いしない（仕様 §7-3）。
+-- CreateEnum
+CREATE TYPE "AdjustmentType" AS ENUM ('T1', 'T2', 'T3', 'T4', 'T5', 'T6');
 
--- 範囲型 GiST インデックスに必要
+-- CreateEnum
+CREATE TYPE "EventStatus" AS ENUM ('draft', 'open', 'holding', 'confirmed', 'closed', 'expired', 'cancelled');
+
+-- CreateEnum
+CREATE TYPE "HoldStatus" AS ENUM ('active', 'released', 'confirmed');
+
+-- CreateEnum
+CREATE TYPE "RelaySubMode" AS ENUM ('converge', 'chained', 'independent');
+
+-- CreateEnum
+CREATE TYPE "RelayStepStatus" AS ENUM ('waiting', 'active', 'done', 'skipped');
+
+-- CreateTable
+CREATE TABLE "BookingPage" (
+    "id" TEXT NOT NULL,
+    "organizerId" TEXT NOT NULL,
+    "type" "AdjustmentType" NOT NULL,
+    "slug" TEXT NOT NULL,
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "settings" JSONB NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "BookingPage_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Event" (
+    "id" TEXT NOT NULL,
+    "pageId" TEXT NOT NULL,
+    "type" "AdjustmentType" NOT NULL,
+    "status" "EventStatus" NOT NULL DEFAULT 'open',
+    "idempotencyKey" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "Event_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Candidate" (
+    "id" TEXT NOT NULL,
+    "eventId" TEXT NOT NULL,
+    "startAt" TIMESTAMP(3) NOT NULL,
+    "endAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Candidate_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Hold" (
+    "id" TEXT NOT NULL,
+    "eventId" TEXT NOT NULL,
+    "candidateId" TEXT NOT NULL,
+    "resourceId" TEXT NOT NULL,
+    "holderId" TEXT NOT NULL,
+    "startAt" TIMESTAMP(3) NOT NULL,
+    "endAt" TIMESTAMP(3) NOT NULL,
+    "status" "HoldStatus" NOT NULL DEFAULT 'active',
+    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "Hold_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Confirmation" (
+    "id" TEXT NOT NULL,
+    "eventId" TEXT NOT NULL,
+    "participantId" TEXT NOT NULL,
+    "startAt" TIMESTAMP(3) NOT NULL,
+    "endAt" TIMESTAMP(3) NOT NULL,
+    "formAnswers" JSONB,
+    "confirmedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "Confirmation_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "RelayStep" (
+    "id" TEXT NOT NULL,
+    "eventId" TEXT NOT NULL,
+    "order" INTEGER NOT NULL,
+    "assigneeId" TEXT NOT NULL,
+    "subMode" "RelaySubMode" NOT NULL DEFAULT 'converge',
+    "status" "RelayStepStatus" NOT NULL DEFAULT 'waiting',
+    "deadline" TIMESTAMP(3),
+    "slotStart" TIMESTAMP(3),
+    "slotEnd" TIMESTAMP(3),
+
+    CONSTRAINT "RelayStep_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Vote" (
+    "id" TEXT NOT NULL,
+    "eventId" TEXT NOT NULL,
+    "candidateId" TEXT NOT NULL,
+    "voterId" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "Vote_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Resource" (
+    "id" TEXT NOT NULL,
+    "kind" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "capacity" INTEGER NOT NULL DEFAULT 1,
+
+    CONSTRAINT "Resource_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "AuditLog" (
+    "id" TEXT NOT NULL,
+    "eventId" TEXT,
+    "actorId" TEXT NOT NULL,
+    "action" TEXT NOT NULL,
+    "before" JSONB,
+    "after" JSONB,
+    "at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "AuditLog_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "BookingPage_slug_key" ON "BookingPage"("slug");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Event_idempotencyKey_key" ON "Event"("idempotencyKey");
+
+-- CreateIndex
+CREATE INDEX "Candidate_eventId_idx" ON "Candidate"("eventId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Candidate_eventId_startAt_endAt_key" ON "Candidate"("eventId", "startAt", "endAt");
+
+-- CreateIndex
+CREATE INDEX "Hold_eventId_idx" ON "Hold"("eventId");
+
+-- CreateIndex
+CREATE INDEX "Hold_resourceId_status_idx" ON "Hold"("resourceId", "status");
+
+-- CreateIndex
+CREATE INDEX "Confirmation_eventId_idx" ON "Confirmation"("eventId");
+
+-- CreateIndex
+CREATE INDEX "RelayStep_eventId_idx" ON "RelayStep"("eventId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "RelayStep_eventId_order_key" ON "RelayStep"("eventId", "order");
+
+-- CreateIndex
+CREATE INDEX "Vote_eventId_idx" ON "Vote"("eventId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Vote_eventId_candidateId_voterId_key" ON "Vote"("eventId", "candidateId", "voterId");
+
+-- CreateIndex
+CREATE INDEX "AuditLog_eventId_idx" ON "AuditLog"("eventId");
+
+-- AddForeignKey
+ALTER TABLE "Event" ADD CONSTRAINT "Event_pageId_fkey" FOREIGN KEY ("pageId") REFERENCES "BookingPage"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Candidate" ADD CONSTRAINT "Candidate_eventId_fkey" FOREIGN KEY ("eventId") REFERENCES "Event"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Hold" ADD CONSTRAINT "Hold_eventId_fkey" FOREIGN KEY ("eventId") REFERENCES "Event"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Hold" ADD CONSTRAINT "Hold_candidateId_fkey" FOREIGN KEY ("candidateId") REFERENCES "Candidate"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Confirmation" ADD CONSTRAINT "Confirmation_eventId_fkey" FOREIGN KEY ("eventId") REFERENCES "Event"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "RelayStep" ADD CONSTRAINT "RelayStep_eventId_fkey" FOREIGN KEY ("eventId") REFERENCES "Event"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Vote" ADD CONSTRAINT "Vote_eventId_fkey" FOREIGN KEY ("eventId") REFERENCES "Event"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+
+-- ★ ダブルブッキング物理防止（仕様 §12）：EXCLUDE 制約（GiST + tstzrange &&）
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 
--- （enum / テーブル本体は `prisma migrate` が schema.prisma から生成する。
---   このファイルは EXCLUDE 制約という Prisma 非対応部分を補う追補マイグレーションとして適用する。）
-
--- Hold への排他制約：active または confirmed を対象に、resource_id 一致かつ時間帯が重なる行を禁止。
--- ★ confirmed（確定済み＝実予約）も対象に含める＝既に予約済みの枠に新たな Hold/確定を物理的に作れない。
---   （active だけだと「確定後の同一枠を別イベントが再予約できる」穴が残るため §12 の核を満たさない。）
 ALTER TABLE "Hold"
   ADD CONSTRAINT hold_no_double_booking
   EXCLUDE USING gist (
@@ -20,9 +194,3 @@ ALTER TABLE "Hold"
     tstzrange("startAt", "endAt", '[)') WITH &&
   )
   WHERE (status IN ('active', 'confirmed'));
-
--- 補足：
--- ・active → confirmed の遷移は同一行が制約集合に留まるため自己衝突せず通る。
--- ・released は制約対象外（再取得可能）。
--- ・TTL 失効した active は別イベントの取得を阻害しないよう、アプリ側で速やかに released へ落とす
---   （取得時の遅延スイープ ＋ 定期ジョブ）。本番 Prisma 実装で holdSlot 前に期限切れ active を解放する。
