@@ -12,12 +12,16 @@ import type {
   CreateEventInput,
   CreateHoldInput,
   CreatePageInput,
+  CreateRelayStepInput,
   EventRec,
   HoldRec,
+  RelayStepRec,
   Repository,
+  VoteRec,
+  VoteTally,
 } from './types.js';
 import { ConflictHoldError } from './types.js';
-import type { Interval, Slot } from '../domain/types.js';
+import type { Interval, RelaySubMode, Slot } from '../domain/types.js';
 
 let _client: PrismaClient | undefined;
 function getClient(): PrismaClient {
@@ -104,6 +108,46 @@ function toHoldRec(h: {
     status: h.status as HoldRec['status'],
     expiresAt: toMs(h.expiresAt),
     createdAt: toMs(h.createdAt),
+  };
+}
+
+function toVoteRec(v: {
+  id: string;
+  eventId: string;
+  candidateId: string;
+  voterId: string;
+  createdAt: Date;
+}): VoteRec {
+  return {
+    id: v.id,
+    eventId: v.eventId,
+    candidateId: v.candidateId,
+    voterId: v.voterId,
+    createdAt: toMs(v.createdAt),
+  };
+}
+
+function toRelayStepRec(s: {
+  id: string;
+  eventId: string;
+  order: number;
+  assigneeId: string;
+  subMode: string;
+  status: string;
+  deadline: Date | null;
+  slotStart: Date | null;
+  slotEnd: Date | null;
+}): RelayStepRec {
+  return {
+    id: s.id,
+    eventId: s.eventId,
+    order: s.order,
+    assigneeId: s.assigneeId,
+    subMode: s.subMode as RelaySubMode,
+    status: s.status as RelayStepRec['status'],
+    deadline: s.deadline ? toMs(s.deadline) : null,
+    slotStart: s.slotStart ? toMs(s.slotStart) : null,
+    slotEnd: s.slotEnd ? toMs(s.slotEnd) : null,
   };
 }
 
@@ -324,6 +368,154 @@ export class PrismaRepository implements Repository {
       },
     });
     return rows.map((h) => ({ start: toMs(h.startAt), end: toMs(h.endAt) }));
+  }
+
+  // ---------- T3 投票型 ----------
+  async addCandidate(eventId: string, slot: Slot): Promise<CandidateRec> {
+    return this.upsertCandidate(eventId, slot);
+  }
+
+  async listCandidates(eventId: string): Promise<CandidateRec[]> {
+    const rows = await this.db.candidate.findMany({
+      where: { eventId },
+      orderBy: { startAt: 'asc' },
+    });
+    return rows.map(toCandidateRec);
+  }
+
+  async castVote(eventId: string, candidateId: string, voterId: string): Promise<VoteRec> {
+    const v = await this.db.vote.upsert({
+      where: {
+        eventId_candidateId_voterId: { eventId, candidateId, voterId },
+      },
+      create: { eventId, candidateId, voterId },
+      update: {},
+    });
+    return toVoteRec(v);
+  }
+
+  async tallyVotes(eventId: string): Promise<VoteTally[]> {
+    const cands = await this.listCandidates(eventId);
+    const grouped = await this.db.vote.groupBy({
+      by: ['candidateId'],
+      where: { eventId },
+      _count: { _all: true },
+    });
+    const map = new Map<string, number>();
+    for (const g of grouped) map.set(g.candidateId, g._count._all);
+    return cands.map((c) => ({ candidate: c, count: map.get(c.id) ?? 0 }));
+  }
+
+  // ---------- T6 リレー型 ----------
+  async createRelaySteps(
+    eventId: string,
+    steps: CreateRelayStepInput[],
+  ): Promise<RelayStepRec[]> {
+    if (steps.length === 0) throw new Error('relay requires at least one step');
+    const existing = await this.db.relayStep.count({ where: { eventId } });
+    if (existing > 0) throw new Error('relay steps already exist for this event');
+    const orders = new Set<number>();
+    for (const s of steps) {
+      if (orders.has(s.order)) throw new Error(`duplicate order: ${s.order}`);
+      orders.add(s.order);
+    }
+    const sorted = [...steps].sort((a, b) => a.order - b.order);
+    await this.db.$transaction(async (tx) => {
+      for (let i = 0; i < sorted.length; i++) {
+        const s = sorted[i]!;
+        await tx.relayStep.create({
+          data: {
+            eventId,
+            order: s.order,
+            assigneeId: s.assigneeId,
+            subMode: s.subMode as never,
+            status: (i === 0 ? 'active' : 'waiting') as never,
+            deadline: s.deadline ? toDate(s.deadline) : null,
+          },
+        });
+      }
+    });
+    return this.getRelaySteps(eventId);
+  }
+
+  async getRelaySteps(eventId: string): Promise<RelayStepRec[]> {
+    const rows = await this.db.relayStep.findMany({
+      where: { eventId },
+      orderBy: { order: 'asc' },
+    });
+    return rows.map(toRelayStepRec);
+  }
+
+  async advanceRelay(
+    eventId: string,
+    stepId: string,
+    confirmedSlot: Slot,
+  ): Promise<RelayStepRec[] | null> {
+    return this.db.$transaction(async (tx) => {
+      const steps = await tx.relayStep.findMany({
+        where: { eventId },
+        orderBy: { order: 'asc' },
+      });
+      if (steps.length === 0) return null;
+      const activeIdx = steps.findIndex((s) => s.status === 'active');
+      if (activeIdx === -1) return null;
+      const active = steps[activeIdx]!;
+      if (active.id !== stepId) return null;
+
+      await tx.relayStep.update({
+        where: { id: active.id },
+        data: {
+          status: 'done' as never,
+          slotStart: toDate(confirmedSlot.start),
+          slotEnd: toDate(confirmedSlot.end),
+        },
+      });
+
+      const nextIdx = steps.findIndex((s, i) => i > activeIdx && s.status === 'waiting');
+      if (nextIdx !== -1) {
+        await tx.relayStep.update({
+          where: { id: steps[nextIdx]!.id },
+          data: { status: 'active' as never },
+        });
+      }
+
+      const after = await tx.relayStep.findMany({
+        where: { eventId },
+        orderBy: { order: 'asc' },
+      });
+      return after.map(toRelayStepRec);
+    });
+  }
+
+  async rollbackRelay(eventId: string, stepId: string): Promise<RelayStepRec[] | null> {
+    return this.db.$transaction(async (tx) => {
+      const steps = await tx.relayStep.findMany({
+        where: { eventId },
+        orderBy: { order: 'asc' },
+      });
+      const targetIdx = steps.findIndex((s) => s.id === stepId);
+      if (targetIdx === -1) return null;
+      const target = steps[targetIdx]!;
+      if (target.status !== 'done') return null;
+
+      for (let i = targetIdx; i < steps.length; i++) {
+        const s = steps[i]!;
+        await tx.relayStep.update({
+          where: { id: s.id },
+          data: {
+            status: (i === targetIdx ? 'active' : 'waiting') as never,
+            slotStart: null,
+            slotEnd: null,
+          },
+        });
+      }
+
+      const after = await tx.relayStep.findMany({
+        where: { eventId },
+        orderBy: { order: 'asc' },
+      });
+      return after.map(toRelayStepRec);
+    });
   }
 }
 

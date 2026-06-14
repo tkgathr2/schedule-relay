@@ -14,11 +14,16 @@ import type {
   CreateEventInput,
   CreateHoldInput,
   CreatePageInput,
+  CreateRelayStepInput,
   EventRec,
   HoldRec,
+  RelayStepRec,
   Repository,
+  VoteRec,
+  VoteTally,
 } from './types.js';
 import { ConflictHoldError } from './types.js';
+import type { Slot } from '../domain/types.js';
 
 export class MemoryRepository implements Repository {
   private pages = new Map<string, BookingPageRec>();
@@ -28,6 +33,8 @@ export class MemoryRepository implements Repository {
   private candidates = new Map<string, CandidateRec>();
   private holds = new Map<string, HoldRec>();
   private confirmations = new Map<string, ConfirmationRec>();
+  private votes = new Map<string, VoteRec>();
+  private relaySteps = new Map<string, RelayStepRec>();
   private seq = 0;
 
   private id(prefix: string): string {
@@ -199,6 +206,134 @@ export class MemoryRepository implements Repository {
       if (blocks) out.push({ start: h.start, end: h.end });
     }
     return out;
+  }
+
+  // ---------- T3 投票型 ----------
+  async addCandidate(eventId: string, slot: Slot): Promise<CandidateRec> {
+    // 同一 (eventId, slot) は upsertCandidate と同じく再利用＝重複候補を作らない。
+    return this.upsertCandidate(eventId, slot);
+  }
+
+  async listCandidates(eventId: string): Promise<CandidateRec[]> {
+    return [...this.candidates.values()]
+      .filter((c) => c.eventId === eventId)
+      .sort((a, b) => a.start - b.start);
+  }
+
+  async castVote(eventId: string, candidateId: string, voterId: string): Promise<VoteRec> {
+    // 二重投票防止：(eventId, candidateId, voterId) で一意。既存があれば再利用。
+    for (const v of this.votes.values()) {
+      if (v.eventId === eventId && v.candidateId === candidateId && v.voterId === voterId) {
+        return v;
+      }
+    }
+    const rec: VoteRec = {
+      id: this.id('vote'),
+      eventId,
+      candidateId,
+      voterId,
+      createdAt: this.now(),
+    };
+    this.votes.set(rec.id, rec);
+    return rec;
+  }
+
+  async tallyVotes(eventId: string): Promise<VoteTally[]> {
+    const cands = await this.listCandidates(eventId);
+    const counts = new Map<string, number>();
+    for (const v of this.votes.values()) {
+      if (v.eventId !== eventId) continue;
+      counts.set(v.candidateId, (counts.get(v.candidateId) ?? 0) + 1);
+    }
+    return cands.map((c) => ({ candidate: c, count: counts.get(c.id) ?? 0 }));
+  }
+
+  // ---------- T6 リレー型 ----------
+  async createRelaySteps(
+    eventId: string,
+    steps: CreateRelayStepInput[],
+  ): Promise<RelayStepRec[]> {
+    for (const s of this.relaySteps.values()) {
+      if (s.eventId === eventId) {
+        throw new Error('relay steps already exist for this event');
+      }
+    }
+    if (steps.length === 0) throw new Error('relay requires at least one step');
+    const orders = new Set<number>();
+    for (const s of steps) {
+      if (orders.has(s.order)) throw new Error(`duplicate order: ${s.order}`);
+      orders.add(s.order);
+    }
+    const sorted = [...steps].sort((a, b) => a.order - b.order);
+    const created: RelayStepRec[] = sorted.map((s, idx) => ({
+      id: this.id('rstep'),
+      eventId,
+      order: s.order,
+      assigneeId: s.assigneeId,
+      subMode: s.subMode,
+      status: idx === 0 ? 'active' : 'waiting',
+      deadline: s.deadline ?? null,
+      slotStart: null,
+      slotEnd: null,
+    }));
+    for (const r of created) this.relaySteps.set(r.id, r);
+    return created;
+  }
+
+  async getRelaySteps(eventId: string): Promise<RelayStepRec[]> {
+    return [...this.relaySteps.values()]
+      .filter((s) => s.eventId === eventId)
+      .sort((a, b) => a.order - b.order);
+  }
+
+  async advanceRelay(
+    eventId: string,
+    stepId: string,
+    confirmedSlot: Slot,
+  ): Promise<RelayStepRec[] | null> {
+    const steps = await this.getRelaySteps(eventId);
+    if (steps.length === 0) return null;
+    const activeIdx = steps.findIndex((s) => s.status === 'active');
+    if (activeIdx === -1) return null;
+    const active = steps[activeIdx]!;
+    if (active.id !== stepId) return null;
+
+    const doneRec = this.relaySteps.get(active.id);
+    if (!doneRec) return null;
+    doneRec.status = 'done';
+    doneRec.slotStart = confirmedSlot.start;
+    doneRec.slotEnd = confirmedSlot.end;
+
+    const nextIdx = steps.findIndex((s, i) => i > activeIdx && s.status === 'waiting');
+    if (nextIdx !== -1) {
+      const next = this.relaySteps.get(steps[nextIdx]!.id);
+      if (next) next.status = 'active';
+    }
+    return this.getRelaySteps(eventId);
+  }
+
+  async rollbackRelay(eventId: string, stepId: string): Promise<RelayStepRec[] | null> {
+    const steps = await this.getRelaySteps(eventId);
+    if (steps.length === 0) return null;
+    const targetIdx = steps.findIndex((s) => s.id === stepId);
+    if (targetIdx === -1) return null;
+    const target = steps[targetIdx]!;
+    if (target.status !== 'done') return null;
+
+    for (let i = targetIdx; i < steps.length; i++) {
+      const rec = this.relaySteps.get(steps[i]!.id);
+      if (!rec) continue;
+      if (i === targetIdx) {
+        rec.status = 'active';
+        rec.slotStart = null;
+        rec.slotEnd = null;
+      } else {
+        rec.status = 'waiting';
+        rec.slotStart = null;
+        rec.slotEnd = null;
+      }
+    }
+    return this.getRelaySteps(eventId);
   }
 
   // createdAt 用の時刻。確定/失効の判定は呼び出し側が渡す now を使うため、ここは記録専用。
