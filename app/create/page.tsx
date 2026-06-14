@@ -124,6 +124,7 @@ export default function CreatePage() {
       <div className="sc-topbar">
         <div className="sc-logo"><span className="mk">📅</span>スケジュール調整くん</div>
         <div className="sc-spacer" />
+        <a href="/propose" style={{ fontSize: 12.5, color: '#2563eb', textDecoration: 'none', fontWeight: 600, marginRight: 12 }}>→ 詳細：候補を自動抽出</a>
         <span className="sc-pill">空き時間リンクを作成</span>
       </div>
 

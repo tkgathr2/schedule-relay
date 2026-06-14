@@ -58,6 +58,7 @@ export default function Home() {
           <p>Google・Microsoftカレンダーと自動同期。入っている予定はそのまま見えて、空き枠だけを共有。二重予約は起きません。順番に決める<strong>リレー型</strong>もこれだけ。</p>
           <div style={{ marginTop: 22, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
             <a href="/create" style={{ background: '#2563eb', color: '#fff', textDecoration: 'none', fontWeight: 700, padding: '12px 22px', borderRadius: 10, fontSize: 15 }}>＋ 空き時間リンクを作る</a>
+            <a href="/propose" style={{ background: '#fff', color: '#2563eb', textDecoration: 'none', fontWeight: 700, padding: '12px 22px', borderRadius: 10, fontSize: 15, border: '2px solid #2563eb' }}>＋ 候補を自動抽出して提案する</a>
             <span style={{ alignSelf: 'center', color: '#6b7280', fontSize: 13 }}>URLを送るだけ・相手は1枠選ぶだけ</span>
           </div>
         </div>
