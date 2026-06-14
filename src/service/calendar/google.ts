@@ -94,21 +94,63 @@ export async function createCalendarEventWithMeet(
 }
 
 /**
+ * カレンダー一覧（複数選択UI用）。失敗時は [] （degrade-safe）。
+ * 「候補を自動抽出」UIで主催者の全カレンダーを名前付きで提示するために使う。
+ */
+export interface GoogleCalendarSummary {
+  id: string;
+  summary: string;
+  backgroundColor?: string;
+  primary?: boolean;
+  accessRole?: string;
+}
+
+export async function listGoogleCalendars(
+  cfg: GoogleCalendarConfig,
+): Promise<GoogleCalendarSummary[]> {
+  try {
+    const oauth2 = new google.auth.OAuth2(cfg.clientId, cfg.clientSecret);
+    oauth2.setCredentials({ refresh_token: cfg.refreshToken });
+    const cal = google.calendar({ version: 'v3', auth: oauth2 });
+    const list = await cal.calendarList.list({ maxResults: 250, minAccessRole: 'reader' });
+    const items = list.data.items ?? [];
+    return items
+      .filter((c): c is { id: string; summary?: string | null; backgroundColor?: string | null; primary?: boolean | null; accessRole?: string | null } => !!c.id)
+      .map((c) => ({
+        id: c.id,
+        summary: c.summary ?? c.id,
+        backgroundColor: c.backgroundColor ?? undefined,
+        primary: c.primary ?? false,
+        accessRole: c.accessRole ?? undefined,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+/**
  * [timeMinMs, timeMaxMs) の範囲で、対象カレンダーの busy 区間（UTC ms）を返す。
  * 失敗時は [] （degrade-safe）。
+ * opts.calendarIds を渡すと cfg.calendarIds を上書き（候補抽出UIで個別選択するため）。
  */
+export interface GoogleFreeBusyOptions {
+  /** 上書き対象カレンダーID（空/未指定なら cfg.calendarIds を使う）。 */
+  calendarIds?: string[];
+}
+
 export async function googleFreeBusy(
   cfg: GoogleCalendarConfig,
   timeMinMs: number,
   timeMaxMs: number,
+  opts?: GoogleFreeBusyOptions,
 ): Promise<Interval[]> {
   try {
     const oauth2 = new google.auth.OAuth2(cfg.clientId, cfg.clientSecret);
     oauth2.setCredentials({ refresh_token: cfg.refreshToken });
     const cal = google.calendar({ version: 'v3', auth: oauth2 });
 
-    // 'auto' なら全カレンダーを列挙して対象にする（主催者の予定を漏れなく busy にする）。
-    let ids = cfg.calendarIds;
+    // 明示指定があればそちらを優先（候補抽出UIで複数選択した結果を直接渡す）。
+    let ids = opts?.calendarIds && opts.calendarIds.length > 0 ? opts.calendarIds : cfg.calendarIds;
     if (ids.includes('auto')) {
       const list = await cal.calendarList.list({ maxResults: 250 });
       const all = (list.data.items ?? [])
