@@ -3,7 +3,8 @@
  * /propose — Spirの「候補を自動抽出」相当の3カラムUI。
  * 左：設定（タイトル・調整タイプT2/T3・打合せ時間・期間・営業時間・バッファ）
  * 中：予定を考慮するカレンダー（複数選択）
- * 右：抽出結果（チェック→「この候補を反映」で予約ページ作成）
+ * 右：Spir風 週カレンダーグリッド（既存予定=色付きブロック / 候補=青点線オーバーレイ）
+ *     候補ブロッククリックで個別トグル → 「この候補を反映」で予約ページ作成
  */
 import { useEffect, useMemo, useState } from 'react';
 import '../scheduler.css';
@@ -17,8 +18,13 @@ type Calendar = {
 };
 
 type SlotDto = { start: string; end: string };
+type BusyDto = { start: string; end: string; title?: string };
+type BusyByCalendar = Record<string, BusyDto[]>;
 
 const TZ = 'Asia/Tokyo';
+const HOUR_START = 8; // 表示開始
+const HOUR_END = 23; // 表示終了
+const SLOT_PX = 60; // 1時間=60px
 
 function fmtSlotJa(startIso: string, endIso: string): string {
   const s = new Date(startIso);
@@ -31,6 +37,10 @@ function fmtSlotJa(startIso: string, endIso: string): string {
   const sh = s.toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
   const eh = e.toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
   return `${m}/${d}（${dowJa}） ${sh}-${eh}`;
+}
+
+function fmtTimeJa(iso: string): string {
+  return new Date(iso).toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
 function todayIso(): string {
@@ -48,6 +58,76 @@ function randSlug(): string {
   const chars = 'abcdefghijkmnpqrstuvwxyz23456789';
   for (let i = 0; i < 7; i++) s += chars[Math.floor(Math.random() * chars.length)];
   return s;
+}
+
+// JST の YYYY-MM-DD を Date(00:00 JST) として ms に
+function jstDateMs(ymd: string): number {
+  return new Date(`${ymd}T00:00:00+09:00`).getTime();
+}
+// ms から JST の YYYY-MM-DD を返す
+function msToJstYmd(ms: number): string {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(ms));
+  const obj = Object.fromEntries(parts.map((p) => [p.type, p.value]));
+  return `${obj.year}-${obj.month}-${obj.day}`;
+}
+// 月曜開始の週初め（JST）を返す
+function startOfWeekJst(ms: number): number {
+  const ymd = msToJstYmd(ms);
+  const baseMs = jstDateMs(ymd);
+  // baseMs が何曜日か（0=日…6=土）。月=1 にするため (dow+6)%7 を引く
+  const dow = new Date(baseMs).getUTCDay() === 0 ? 0 : new Date(baseMs).getUTCDay();
+  // JST 00:00 のときの UTC 曜日は前日になる可能性があるため、JST の曜日で取り直す
+  const dowJa = new Intl.DateTimeFormat('en-US', { timeZone: TZ, weekday: 'short' }).format(new Date(baseMs));
+  const dowMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  const dowJaIdx = dowMap[dowJa] ?? dow;
+  const offset = (dowJaIdx + 6) % 7;
+  return baseMs - offset * 24 * 60 * 60 * 1000;
+}
+
+function addDays(ms: number, days: number): number {
+  return ms + days * 24 * 60 * 60 * 1000;
+}
+
+// その日の HOUR_START 時点（JST）を ms で
+function dayStartHourMs(ymd: string): number {
+  return new Date(`${ymd}T${String(HOUR_START).padStart(2, '0')}:00:00+09:00`).getTime();
+}
+
+// ms → グリッド上の top px（その日 HOUR_START からの分 / 60 * SLOT_PX）。範囲外は clamp。
+function msToTopPx(ms: number, dayYmd: string): number {
+  const base = dayStartHourMs(dayYmd);
+  const min = (ms - base) / 60000;
+  const totalMin = (HOUR_END - HOUR_START) * 60;
+  const clamped = Math.max(0, Math.min(totalMin, min));
+  return (clamped / 60) * SLOT_PX;
+}
+
+// 区間長(ms) → 高さ px
+function durationMsToHeightPx(start: number, end: number, dayYmd: string): number {
+  const dayBase = dayStartHourMs(dayYmd);
+  const dayEnd = dayBase + (HOUR_END - HOUR_START) * 60 * 60 * 1000;
+  const s = Math.max(start, dayBase);
+  const e = Math.min(end, dayEnd);
+  if (e <= s) return 0;
+  const min = (e - s) / 60000;
+  return Math.max(8, (min / 60) * SLOT_PX);
+}
+
+// hex / "#rrggbb" or "#rgb" → rgba(r,g,b,a) 文字列に
+function hexToRgba(hex: string | undefined, alpha: number): string {
+  if (!hex) return `rgba(156,163,175,${alpha})`;
+  const m = hex.trim().replace('#', '');
+  let r = 156, g = 163, b = 175;
+  if (m.length === 3) {
+    r = parseInt(m[0]! + m[0]!, 16);
+    g = parseInt(m[1]! + m[1]!, 16);
+    b = parseInt(m[2]! + m[2]!, 16);
+  } else if (m.length === 6) {
+    r = parseInt(m.slice(0, 2), 16);
+    g = parseInt(m.slice(2, 4), 16);
+    b = parseInt(m.slice(4, 6), 16);
+  }
+  return `rgba(${r},${g},${b},${alpha})`;
 }
 
 export default function ProposePage() {
@@ -71,9 +151,13 @@ export default function ProposePage() {
 
   // 抽出結果
   const [slots, setSlots] = useState<SlotDto[]>([]);
+  const [busyByCalendar, setBusyByCalendar] = useState<BusyByCalendar>({});
   const [selectedSlots, setSelectedSlots] = useState<Set<number>>(new Set());
   const [extracting, setExtracting] = useState(false);
   const [extractErr, setExtractErr] = useState<string | null>(null);
+
+  // 週ナビ：表示開始週（月曜・JST ms）
+  const [viewWeekStart, setViewWeekStart] = useState<number>(() => startOfWeekJst(Date.now()));
 
   // 反映結果
   const [doneUrl, setDoneUrl] = useState<string | null>(null);
@@ -107,10 +191,18 @@ export default function ProposePage() {
     return title.trim().length > 0 && periodStart < periodEnd && whStart < whEnd && !extracting;
   }, [title, periodStart, periodEnd, whStart, whEnd, extracting]);
 
+  // カレンダーID → 色 マップ
+  const calColorMap = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of calendars) m.set(c.id, c.backgroundColor || '#9ca3af');
+    return m;
+  }, [calendars]);
+
   async function extract() {
     setExtracting(true);
     setExtractErr(null);
     setSlots([]);
+    setBusyByCalendar({});
     setSelectedSlots(new Set());
     try {
       const body = {
@@ -138,8 +230,11 @@ export default function ProposePage() {
       if (!res.ok) throw new Error(data?.error?.message || '抽出に失敗しました');
       const got: SlotDto[] = data.slots ?? [];
       setSlots(got);
+      setBusyByCalendar((data.busyByCalendar ?? {}) as BusyByCalendar);
       // 既定で全件選択
       setSelectedSlots(new Set(got.map((_, i) => i)));
+      // ビューを期間開始週に合わせる
+      setViewWeekStart(startOfWeekJst(jstDateMs(periodStart)));
     } catch (e) {
       setExtractErr(e instanceof Error ? e.message : '抽出に失敗しました');
     } finally {
@@ -247,6 +342,71 @@ export default function ProposePage() {
       return next;
     });
   }
+
+  // 表示週の各日 YMD（月-日）
+  const weekDays = useMemo(() => {
+    const out: { ms: number; ymd: string; dowJa: string; day: number; isToday: boolean; outOfPeriod: boolean }[] = [];
+    const todayYmd = msToJstYmd(Date.now());
+    const periodStartMs = jstDateMs(periodStart);
+    const periodEndMs = jstDateMs(periodEnd);
+    for (let i = 0; i < 7; i++) {
+      const ms = addDays(viewWeekStart, i);
+      const ymd = msToJstYmd(ms);
+      const dowJa = new Intl.DateTimeFormat('ja-JP', { timeZone: TZ, weekday: 'short' }).format(new Date(ms));
+      const day = Number(ymd.slice(8, 10));
+      out.push({
+        ms,
+        ymd,
+        dowJa,
+        day,
+        isToday: ymd === todayYmd,
+        outOfPeriod: ms < periodStartMs || ms > periodEndMs,
+      });
+    }
+    return out;
+  }, [viewWeekStart, periodStart, periodEnd]);
+
+  // 表示月（先頭日の月）
+  const viewMonthLabel = useMemo(() => {
+    const head = weekDays[0]?.ms ?? Date.now();
+    return new Intl.DateTimeFormat('ja-JP', { timeZone: TZ, year: 'numeric', month: 'long' }).format(new Date(head));
+  }, [weekDays]);
+
+  // 表示週・各日に該当する busy ブロック
+  const busyForDay = useMemo(() => {
+    return (ymd: string): { calId: string; start: number; end: number; title?: string }[] => {
+      const dayStart = jstDateMs(ymd);
+      const dayEnd = addDays(dayStart, 1);
+      const out: { calId: string; start: number; end: number; title?: string }[] = [];
+      for (const calId of Object.keys(busyByCalendar)) {
+        for (const b of busyByCalendar[calId] ?? []) {
+          const s = Date.parse(b.start);
+          const e = Date.parse(b.end);
+          if (e <= dayStart || s >= dayEnd) continue;
+          const item: { calId: string; start: number; end: number; title?: string } = { calId, start: s, end: e };
+          if (b.title) item.title = b.title;
+          out.push(item);
+        }
+      }
+      return out;
+    };
+  }, [busyByCalendar]);
+
+  // 表示週・各日に該当する候補
+  const candForDay = useMemo(() => {
+    return (ymd: string): { idx: number; start: number; end: number }[] => {
+      const dayStart = jstDateMs(ymd);
+      const dayEnd = addDays(dayStart, 1);
+      const out: { idx: number; start: number; end: number }[] = [];
+      slots.forEach((s, i) => {
+        const sMs = Date.parse(s.start);
+        const eMs = Date.parse(s.end);
+        if (eMs <= dayStart || sMs >= dayEnd) return;
+        out.push({ idx: i, start: sMs, end: eMs });
+      });
+      return out;
+    };
+  }, [slots]);
 
   return (
     <div className="sc-wrap">
@@ -406,40 +566,126 @@ export default function ProposePage() {
             )}
           </section>
 
-          {/* 右ペイン：抽出結果 */}
+          {/* 右ペイン：Spir風 週カレンダーグリッド */}
           <section className="pp-right">
-            <h3>抽出された候補</h3>
-            {slots.length === 0 ? (
-              <div style={{ fontSize: 13, color: '#6b7280', padding: 12, background: '#fafafa', borderRadius: 8 }}>
-                「候補を自動抽出」を押すと、ここに候補が表示されます。
+            <div className="pp-cal-wrap">
+              <div className="pp-cal-nav">
+                <button className="pp-cal-today" onClick={() => setViewWeekStart(startOfWeekJst(Date.now()))}>今日</button>
+                <button className="pp-cal-arrow" onClick={() => setViewWeekStart((v) => addDays(v, -7))} aria-label="前の週">&lt;</button>
+                <button className="pp-cal-arrow" onClick={() => setViewWeekStart((v) => addDays(v, 7))} aria-label="次の週">&gt;</button>
+                <span className="pp-cal-month">{viewMonthLabel}</span>
+                <span className="pp-cal-spacer" />
+                {slots.length > 0 && (
+                  <span className="pp-cal-count">候補 {selectedSlots.size}/{slots.length} 件</span>
+                )}
               </div>
-            ) : (
-              <>
-                <div className="pp-slots">
-                  {slots.map((s, i) => {
-                    const on = selectedSlots.has(i);
+
+              <div className="pp-cal-grid" role="grid" aria-label="週カレンダー">
+                {/* ヘッダ行 */}
+                <div className="pp-cal-head">
+                  <div className="pp-cal-head-cell pp-cal-head-time" />
+                  {weekDays.map((d) => (
+                    <div key={d.ymd} className={`pp-cal-head-cell ${d.isToday ? 'today' : ''}`}>
+                      <span className="dow">{d.dowJa}</span>
+                      <span className="day">{d.day}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* ボディ：時刻ラベル＋日カラム */}
+                <div className="pp-cal-body">
+                  {/* 1列目：時刻 */}
+                  <div>
+                    {Array.from({ length: HOUR_END - HOUR_START }, (_, i) => i + HOUR_START).map((h) => (
+                      <div key={h} className="pp-cal-time">{String(h).padStart(2, '0')}:00</div>
+                    ))}
+                  </div>
+                  {/* 2..8列目：各日 */}
+                  {weekDays.map((d) => {
+                    const busy = busyForDay(d.ymd);
+                    const cand = candForDay(d.ymd);
                     return (
-                      <label key={i} className={`pp-slot ${on ? 'on' : ''}`}>
-                        <input type="checkbox" checked={on} onChange={() => toggleSlot(i)} />
-                        <span>{fmtSlotJa(s.start, s.end)}</span>
-                      </label>
+                      <div key={d.ymd} className={`pp-cal-day ${d.outOfPeriod ? 'out-of-period' : ''}`}>
+                        {/* 時間ガイド線 */}
+                        {Array.from({ length: HOUR_END - HOUR_START }, (_, i) => i + HOUR_START).map((h) => (
+                          <div key={h} className="pp-cal-day-hour" />
+                        ))}
+                        {/* 既存予定ブロック */}
+                        {busy.map((b, bi) => {
+                          const top = msToTopPx(b.start, d.ymd);
+                          const height = durationMsToHeightPx(b.start, b.end, d.ymd);
+                          if (height <= 0) return null;
+                          const color = calColorMap.get(b.calId) || '#9ca3af';
+                          return (
+                            <div
+                              key={`b${bi}`}
+                              className="pp-cal-busy"
+                              style={{ top, height, background: hexToRgba(color, 0.85), borderColor: color }}
+                              title={b.title || '予定あり'}
+                            >
+                              {b.title && <div className="pp-cal-busy-title">{b.title}</div>}
+                              <div className="pp-cal-busy-time">
+                                {new Date(b.start).toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false })}
+                                {'-'}
+                                {new Date(b.end).toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                        {/* 候補ブロック */}
+                        {cand.map((c) => {
+                          const top = msToTopPx(c.start, d.ymd);
+                          const height = durationMsToHeightPx(c.start, c.end, d.ymd);
+                          if (height <= 0) return null;
+                          const on = selectedSlots.has(c.idx);
+                          return (
+                            <button
+                              key={`c${c.idx}`}
+                              type="button"
+                              className={`pp-cal-cand ${on ? 'on' : ''}`}
+                              style={{ top, height }}
+                              onClick={() => toggleSlot(c.idx)}
+                              title={`${fmtTimeJa(new Date(c.start).toISOString())}-${fmtTimeJa(new Date(c.end).toISOString())}`}
+                            >
+                              <div className="pp-cal-cand-label">候補</div>
+                              <div className="pp-cal-cand-time">
+                                {new Date(c.start).toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false })}
+                                {'-'}
+                                {new Date(c.end).toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false })}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
                     );
                   })}
                 </div>
-                <div style={{ marginTop: 12, fontSize: 12, color: '#6b7280' }}>
-                  反映する候補: {selectedSlots.size} / {slots.length} 件
+              </div>
+
+              <div className="pp-cal-legend">
+                <span className="lg"><span className="sq busy" />既存予定</span>
+                <span className="lg"><span className="sq cand" />候補</span>
+                <span className="lg"><span className="sq out" />期間外</span>
+              </div>
+
+              {slots.length === 0 ? (
+                <div style={{ marginTop: 12, fontSize: 13, color: '#6b7280', padding: 12, background: '#fafafa', borderRadius: 8 }}>
+                  「候補を自動抽出」を押すと、ここに候補がカレンダー上に表示されます。
                 </div>
-                <button
-                  className="sc-btn primary"
-                  style={{ width: '100%', marginTop: 12 }}
-                  disabled={selectedSlots.size === 0 || applying}
-                  onClick={applySelected}
-                >
-                  {applying ? '反映中…' : 'この候補を反映'}
-                </button>
-                {applyErr && <div className="sc-err" style={{ marginTop: 10 }}>{applyErr}</div>}
-              </>
-            )}
+              ) : (
+                <div className="pp-cal-footer">
+                  <div className="pp-cal-summary">反映する候補: {selectedSlots.size} / {slots.length} 件</div>
+                  <button
+                    className="sc-btn primary"
+                    disabled={selectedSlots.size === 0 || applying}
+                    onClick={applySelected}
+                  >
+                    {applying ? '反映中…' : 'この候補を反映'}
+                  </button>
+                </div>
+              )}
+              {applyErr && <div className="sc-err" style={{ marginTop: 10 }}>{applyErr}</div>}
+            </div>
           </section>
         </div>
       )}

@@ -118,7 +118,7 @@
 .sc-err { color: #dc2626; font-size: 12.5px; margin-top: 8px; }
 
 /* ---- /propose ：候補を自動抽出（Spir風3カラム） ---- */
-.sc-propose { display: grid; grid-template-columns: 360px 1fr 1fr; gap: 16px; padding: 20px; max-width: 1280px; margin: 0 auto; }
+.sc-propose { display: grid; grid-template-columns: 320px 280px minmax(0, 1fr); gap: 14px; padding: 20px; max-width: 1480px; margin: 0 auto; }
 .sc-propose > .pp-left,
 .sc-propose > .pp-mid,
 .sc-propose > .pp-right { background: #fff; border: 1px solid var(--sc-line); border-radius: 14px; padding: 20px; }
@@ -140,3 +140,69 @@
 .pp-slot { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid #e5e7eb; border-radius: 8px; cursor: pointer; font-size: 13px; background: #fafafa; font-family: 'Hiragino Kaku Gothic ProN', 'Yu Gothic', sans-serif; }
 .pp-slot.on { background: #ecfdf5; border-color: #6ee7b7; color: #065f46; font-weight: 600; }
 .pp-slot input[type=checkbox] { width: 16px; height: 16px; cursor: pointer; }
+
+/* ---- 週カレンダーグリッド（Spir風）---- */
+.pp-cal-wrap { display: flex; flex-direction: column; height: 100%; min-height: 640px; }
+.pp-cal-nav { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.pp-cal-nav .pp-cal-today { font-size: 12px; padding: 5px 10px; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; cursor: pointer; }
+.pp-cal-nav .pp-cal-today:hover { background: #f3f4f6; }
+.pp-cal-nav .pp-cal-arrow { width: 28px; height: 28px; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; cursor: pointer; font-size: 14px; line-height: 1; padding: 0; }
+.pp-cal-nav .pp-cal-arrow:hover { background: #f3f4f6; }
+.pp-cal-nav .pp-cal-month { font-size: 14px; font-weight: 600; color: #111827; margin-left: 4px; }
+.pp-cal-nav .pp-cal-spacer { flex: 1; }
+.pp-cal-nav .pp-cal-count { font-size: 12px; color: #6b7280; }
+
+.pp-cal-grid { display: grid; grid-template-columns: 60px repeat(7, minmax(0, 1fr)); border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; background: #fff; }
+
+/* 曜日ヘッダ */
+.pp-cal-head { display: contents; }
+.pp-cal-head .pp-cal-head-cell {
+  border-bottom: 1px solid #e5e7eb; border-left: 1px solid #f3f4f6;
+  padding: 8px 4px; text-align: center; background: #fafafa;
+  font-size: 12px; color: #374151;
+}
+.pp-cal-head .pp-cal-head-cell.pp-cal-head-time { background: #fafafa; border-left: none; }
+.pp-cal-head .pp-cal-head-cell.today { background: #eff6ff; color: #1d4ed8; font-weight: 700; }
+.pp-cal-head .pp-cal-head-cell .dow { display: block; font-size: 11px; color: #6b7280; }
+.pp-cal-head .pp-cal-head-cell .day { display: block; font-size: 15px; font-weight: 600; margin-top: 2px; }
+
+/* タイムカラム */
+.pp-cal-body { display: contents; }
+.pp-cal-time { border-left: none; border-bottom: 1px solid #f3f4f6; padding: 2px 6px 0 0; text-align: right; font-size: 11px; color: #6b7280; height: 60px; box-sizing: border-box; }
+.pp-cal-day { position: relative; border-left: 1px solid #f3f4f6; }
+.pp-cal-day.out-of-period { background: rgba(255, 173, 70, 0.15); }
+.pp-cal-day-hour { height: 60px; box-sizing: border-box; border-bottom: 1px solid #f3f4f6; }
+
+/* 既存予定ブロック（カレンダー色） */
+.pp-cal-busy { position: absolute; left: 2px; right: 2px; border-radius: 4px; padding: 3px 5px; box-sizing: border-box;
+  font-size: 11px; line-height: 1.25; overflow: hidden; color: #fff; opacity: 0.92;
+  border: 1px solid rgba(0,0,0,0.06); cursor: default; }
+.pp-cal-busy .pp-cal-busy-title { font-weight: 600; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+.pp-cal-busy .pp-cal-busy-time { font-size: 10px; opacity: 0.85; }
+
+/* 候補ブロック（青点線） */
+.pp-cal-cand { position: absolute; left: 4px; right: 4px; border: 2px dashed #2563eb; border-radius: 6px;
+  background: rgba(37, 99, 235, 0.08); padding: 3px 6px; box-sizing: border-box;
+  font-size: 11px; line-height: 1.25; color: #1e3a8a; cursor: pointer; transition: background .12s, border-color .12s;
+  z-index: 3; }
+.pp-cal-cand:hover { background: rgba(37, 99, 235, 0.16); }
+.pp-cal-cand.on { background: #2563eb; color: #fff; border-style: solid; border-color: #1d4ed8; }
+.pp-cal-cand .pp-cal-cand-label { font-weight: 700; font-size: 10px; letter-spacing: 0.3px; }
+.pp-cal-cand .pp-cal-cand-time { font-size: 11px; }
+
+/* 凡例 */
+.pp-cal-legend { display: flex; gap: 12px; justify-content: flex-end; margin-top: 10px; font-size: 11px; color: #6b7280; flex-wrap: wrap; }
+.pp-cal-legend .lg { display: inline-flex; align-items: center; gap: 4px; }
+.pp-cal-legend .lg .sq { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+.pp-cal-legend .lg .sq.busy { background: #9ca3af; }
+.pp-cal-legend .lg .sq.cand { background: rgba(37,99,235,0.12); border: 2px dashed #2563eb; }
+.pp-cal-legend .lg .sq.out { background: rgba(255, 173, 70, 0.35); }
+
+/* フッタ（選択件数＋反映ボタン） */
+.pp-cal-footer { margin-top: 12px; display: flex; gap: 10px; align-items: center; }
+.pp-cal-footer .pp-cal-summary { flex: 1; font-size: 12px; color: #374151; }
+
+@media (max-width: 1080px) {
+  .sc-propose { grid-template-columns: 1fr; }
+  .pp-cal-grid { grid-template-columns: 50px repeat(7, minmax(0, 1fr)); }
+}
