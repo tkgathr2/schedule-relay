@@ -703,7 +703,7 @@ export default function ProposePage() {
                             <div
                               key={`b${bi}`}
                               className="pp-cal-busy"
-                              style={{ top, height, background: hexToRgba(color, 0.85), borderColor: color }}
+                              style={{ top, height, background: hexToRgba(color, 0.28), borderColor: hexToRgba(color, 0.5), borderLeft: `3px solid ${color}` }}
                               title={b.title || '予定あり'}
                             >
                               {b.title && <div className="pp-cal-busy-title">{b.title}</div>}
