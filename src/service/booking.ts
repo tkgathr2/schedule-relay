@@ -84,13 +84,22 @@ export function resolveSettings(raw: unknown): ResolvedSettings {
   };
 }
 
-/** ページの空き枠を算出（仕様 §14 GET /pages/{slug}/availability）。 */
-export function availabilityForPage(page: BookingPageRec, now: number): Slot[] {
+/**
+ * ページの空き枠を算出（仕様 §14 GET /pages/{slug}/availability）。
+ * extraBusy＝settings.busy 以外に差し引く busy（既存予約/仮押さえ・外部カレンダー freebusy 等）。
+ * これにより「誰かが取った枠が空きから消える」「自分の予定が入った時間は出さない」を実現する。
+ */
+export function availabilityForPage(
+  page: BookingPageRec,
+  now: number,
+  extraBusy: readonly Interval[] = [],
+): Slot[] {
   const cfg = resolveSettings(page.settings);
   const windows = expandWorkingWindows(cfg.workingHours, now, cfg.horizonDays);
+  const busy = extraBusy.length ? [...cfg.busy, ...extraBusy] : cfg.busy;
   return computeAvailability({
     workingWindows: windows,
-    busy: cfg.busy,
+    busy,
     durationMin: cfg.durationMin,
     minNoticeMin: cfg.minNoticeMin,
     bufferBeforeMin: cfg.bufferBeforeMin,
@@ -98,6 +107,21 @@ export function availabilityForPage(page: BookingPageRec, now: number): Slot[] {
     now,
     gridMs: cfg.gridMs,
   });
+}
+
+/**
+ * 「いま現在の本当の空き」を算出する（動的）。
+ * リポジトリから「予約確定済み＋有効な仮押さえ中」の枠を取得して busy として差し引く。
+ * ＝誰かが取った枠は即座に空きから消える。外部カレンダー連携の busy もここに合流させる。
+ */
+export async function liveAvailabilityForPage(
+  repo: Repository,
+  page: BookingPageRec,
+  now: number,
+  externalBusy: readonly Interval[] = [],
+): Promise<Slot[]> {
+  const booked = await repo.listBlockingIntervals(page.organizerId, now);
+  return availabilityForPage(page, now, [...booked, ...externalBusy]);
 }
 
 function slotEq(a: Slot, b: Slot): boolean {
