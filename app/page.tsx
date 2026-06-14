@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import MyPages from './my-pages';
 
 const DAYS = [
   { d: '月', date: '6/15' },
@@ -106,6 +107,8 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      <MyPages />
 
       <section className="section relaysec">
         <div className="wrap">

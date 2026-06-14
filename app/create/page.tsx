@@ -78,7 +78,23 @@ export default function CreatePage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error?.message || '作成に失敗しました');
-      setDoneUrl(`${window.location.origin}/b/${slug.trim()}`);
+      const finalSlug = slug.trim();
+      // ① 「最近作ったページ」を localStorage に保存（Auth.js無しでも自分の作成履歴が見える）
+      try {
+        const KEY = 'schedule-relay:my-pages';
+        const prev = JSON.parse(localStorage.getItem(KEY) || '[]') as unknown[];
+        const filtered = Array.isArray(prev)
+          ? prev.filter((p) => p && typeof p === 'object' && (p as { slug?: unknown }).slug !== finalSlug)
+          : [];
+        const entry = {
+          slug: finalSlug,
+          title: pubTitle.trim(),
+          durationMin: duration,
+          createdAt: new Date().toISOString(),
+        };
+        localStorage.setItem(KEY, JSON.stringify([entry, ...filtered].slice(0, 50)));
+      } catch { /* localStorage 不可時は無視（プライベートブラウザ等） */ }
+      setDoneUrl(`${window.location.origin}/b/${finalSlug}`);
     } catch (e) {
       setErr(e instanceof Error ? e.message : '作成に失敗しました');
     } finally {
