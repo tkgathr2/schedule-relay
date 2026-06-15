@@ -1,6 +1,8 @@
 /**
  * POST /api/pages — 予約ページ作成（§14）。
  * body: { organizerId, type, slug, settings }
+ *
+ * GET /api/pages?organizerId=<id> — 予約ページ一覧（ダッシュボード用・/links 画面のデータ源）。
  */
 import { NextResponse } from 'next/server';
 import { getRepository } from '@/repo/index';
@@ -9,6 +11,21 @@ import { ServiceError } from '@/service/errors';
 import { jsonError } from '@/service/http';
 
 const VALID_TYPES: AdjustmentType[] = ['T1', 'T2', 'T3', 'T4', 'T5', 'T6'];
+
+export async function GET(req: Request): Promise<NextResponse> {
+  try {
+    const url = new URL(req.url);
+    const organizerId = url.searchParams.get('organizerId') ?? '';
+    if (!organizerId) {
+      throw new ServiceError('VALIDATION', 'organizerId は必須です');
+    }
+    const repo = getRepository();
+    const pages = await repo.listPagesByOrganizer(organizerId);
+    return NextResponse.json({ pages });
+  } catch (e) {
+    return jsonError(e);
+  }
+}
 
 export async function POST(req: Request): Promise<NextResponse> {
   try {

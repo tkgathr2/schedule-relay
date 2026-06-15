@@ -14,6 +14,7 @@ import type {
   CreatePageInput,
   CreateRelayStepInput,
   EventRec,
+  EventStatus,
   HoldRec,
   RelayStepRec,
   Repository,
@@ -354,6 +355,50 @@ export class PrismaRepository implements Repository {
       orderBy: { confirmedAt: 'asc' },
     });
     return rows.map(toConfirmationRec);
+  }
+
+  async listPagesByOrganizer(organizerId: string): Promise<BookingPageRec[]> {
+    const rows = await this.db.bookingPage.findMany({
+      where: { organizerId },
+      orderBy: { createdAt: 'desc' },
+    });
+    return rows.map(toPageRec);
+  }
+
+  async listEventsByStatus(statuses: EventStatus[]): Promise<EventRec[]> {
+    const rows = await this.db.event.findMany({
+      where: { status: { in: statuses as never } },
+      orderBy: { createdAt: 'desc' },
+    });
+    return rows.map(toEventRec);
+  }
+
+  async listConfirmationsFiltered(filter?: {
+    organizerId?: string;
+    fromMs?: number;
+  }): Promise<ConfirmationRec[]> {
+    const where: Prisma.ConfirmationWhereInput = {};
+    if (filter?.fromMs !== undefined) {
+      where.startAt = { gte: toDate(filter.fromMs) };
+    }
+    if (filter?.organizerId) {
+      where.event = { is: { page: { is: { organizerId: filter.organizerId } } } };
+    }
+    const rows = await this.db.confirmation.findMany({
+      where,
+      orderBy: { startAt: 'desc' },
+    });
+    return rows.map(toConfirmationRec);
+  }
+
+  async deactivatePageBySlug(slug: string): Promise<BookingPageRec | null> {
+    const existing = await this.db.bookingPage.findUnique({ where: { slug } });
+    if (!existing) return null;
+    const updated = await this.db.bookingPage.update({
+      where: { slug },
+      data: { isActive: false },
+    });
+    return toPageRec(updated);
   }
 
   async listBlockingIntervals(resourceId: string, now: number): Promise<Interval[]> {

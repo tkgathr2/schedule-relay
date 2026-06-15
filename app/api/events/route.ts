@@ -8,6 +8,56 @@ import { getRepository } from '@/repo/index';
 import { createEventForPage } from '@/service/booking';
 import { ServiceError } from '@/service/errors';
 import { jsonError } from '@/service/http';
+import type { EventStatus } from '@/repo/types';
+
+const VALID_STATUSES: EventStatus[] = [
+  'draft',
+  'open',
+  'holding',
+  'confirmed',
+  'closed',
+  'expired',
+  'cancelled',
+];
+
+export async function GET(req: Request): Promise<NextResponse> {
+  try {
+    const url = new URL(req.url);
+    const raw = url.searchParams.get('status') ?? '';
+    let statuses: EventStatus[];
+    if (raw) {
+      statuses = raw
+        .split('|')
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0) as EventStatus[];
+      for (const s of statuses) {
+        if (!VALID_STATUSES.includes(s)) {
+          throw new ServiceError('VALIDATION', `status が不正です: ${s}`);
+        }
+      }
+    } else {
+      // 既定＝未確定の調整（open/holding）
+      statuses = ['open', 'holding'];
+    }
+    const repo = getRepository();
+    const events = await repo.listEventsByStatus(statuses);
+    // 関連 BookingPage を join（settings.title・duration_minutes 取り出し用）
+    const pageMap = new Map<string, unknown>();
+    for (const e of events) {
+      if (!pageMap.has(e.pageId)) {
+        const page = await repo.getPageById(e.pageId);
+        if (page) pageMap.set(e.pageId, page);
+      }
+    }
+    const enriched = events.map((e) => ({
+      ...e,
+      page: pageMap.get(e.pageId) ?? null,
+    }));
+    return NextResponse.json({ events: enriched });
+  } catch (e) {
+    return jsonError(e);
+  }
+}
 
 export async function POST(req: Request): Promise<NextResponse> {
   try {

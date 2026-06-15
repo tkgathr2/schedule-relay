@@ -16,6 +16,7 @@ import type {
   CreatePageInput,
   CreateRelayStepInput,
   EventRec,
+  EventStatus,
   HoldRec,
   RelayStepRec,
   Repository,
@@ -195,6 +196,49 @@ export class MemoryRepository implements Repository {
 
   async listConfirmations(eventId: string): Promise<ConfirmationRec[]> {
     return [...this.confirmations.values()].filter((c) => c.eventId === eventId);
+  }
+
+  async listPagesByOrganizer(organizerId: string): Promise<BookingPageRec[]> {
+    return [...this.pages.values()]
+      .filter((p) => p.organizerId === organizerId)
+      .sort((a, b) => b.createdAt - a.createdAt);
+  }
+
+  async listEventsByStatus(statuses: EventStatus[]): Promise<EventRec[]> {
+    const set = new Set(statuses);
+    return [...this.events.values()]
+      .filter((e) => set.has(e.status))
+      .sort((a, b) => b.createdAt - a.createdAt);
+  }
+
+  async listConfirmationsFiltered(filter?: {
+    organizerId?: string;
+    fromMs?: number;
+  }): Promise<ConfirmationRec[]> {
+    let confs = [...this.confirmations.values()];
+    if (filter?.fromMs !== undefined) {
+      const from = filter.fromMs;
+      confs = confs.filter((c) => c.start >= from);
+    }
+    if (filter?.organizerId) {
+      const orgId = filter.organizerId;
+      confs = confs.filter((c) => {
+        const ev = this.events.get(c.eventId);
+        if (!ev) return false;
+        const page = this.pages.get(ev.pageId);
+        return page ? page.organizerId === orgId : false;
+      });
+    }
+    return confs.sort((a, b) => b.start - a.start);
+  }
+
+  async deactivatePageBySlug(slug: string): Promise<BookingPageRec | null> {
+    const id = this.pagesBySlug.get(slug);
+    if (!id) return null;
+    const page = this.pages.get(id);
+    if (!page) return null;
+    page.isActive = false;
+    return page;
   }
 
   async listBlockingIntervals(resourceId: string, now: number): Promise<{ start: number; end: number }[]> {

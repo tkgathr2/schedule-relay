@@ -146,6 +146,24 @@ export interface Repository {
   /** デバッグ/テスト用：イベントの確定一覧。 */
   listConfirmations(eventId: string): Promise<ConfirmationRec[]>;
 
+  // ---------- 一覧系（ダッシュボード用） ----------
+  /** 指定 organizer の予約ページ一覧（createdAt 降順）。 */
+  listPagesByOrganizer(organizerId: string): Promise<BookingPageRec[]>;
+  /** 指定ステータスのイベント一覧（createdAt 降順）。 */
+  listEventsByStatus(statuses: EventStatus[]): Promise<EventRec[]>;
+  /**
+   * Confirmation の横断一覧。
+   * filter.organizerId 指定時は BookingPage.organizerId で絞り込み（Event→Page で join）。
+   * filter.fromMs 指定時は start >= fromMs のみ。
+   * 並び順は start 降順。
+   */
+  listConfirmationsFiltered(filter?: {
+    organizerId?: string;
+    fromMs?: EpochMs;
+  }): Promise<ConfirmationRec[]>;
+  /** ページを非アクティブにする（slug 指定）。存在しなければ null。 */
+  deactivatePageBySlug(slug: string): Promise<BookingPageRec | null>;
+
   /**
    * 指定リソース（主催者枠）で「いま枠を塞いでいる」区間を返す。
    * ＝確定済み（confirmed）＋未失効の active 仮押さえ（EXCLUDE 制約と同じ述語）。
