@@ -170,7 +170,7 @@ export default function ProposePage() {
   useEffect(() => {
     try { localStorage.setItem('schedule-relay:propose-cutoff-mode', cutoffMode); } catch { /* noop */ }
   }, [cutoffMode]);
-  const [maxSlots, setMaxSlots] = useState(10);
+  const [maxSlots, setMaxSlots] = useState(50);
 
   // カレンダー
   const [calendars, setCalendars] = useState<Calendar[]>([]);
@@ -661,7 +661,7 @@ export default function ProposePage() {
             <div className="sc-field">
               <label>抽出件数</label>
               <select className="sc-select" value={maxSlots} onChange={(e) => setMaxSlots(Number(e.target.value))}>
-                {[5, 10, 20, 30, 50].map((m) => <option key={m} value={m}>{m}件</option>)}
+                {[10, 20, 30, 50, 100, 200].map((m) => <option key={m} value={m}>{m}件</option>)}
               </select>
             </div>
 
