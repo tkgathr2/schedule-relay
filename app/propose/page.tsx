@@ -159,6 +159,17 @@ export default function ProposePage() {
   const [bufBefore, setBufBefore] = useState(0);
   const [bufAfter, setBufAfter] = useState(10);
   const [minNotice, setMinNotice] = useState(60);
+  // 直前ブロックの方式：'prev10'＝対象日の前日10:00を過ぎたら不可（既定）／'minutes'＝従来の現在からN分前
+  const [cutoffMode, setCutoffMode] = useState<'prev10' | 'minutes'>('prev10');
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem('schedule-relay:propose-cutoff-mode');
+      if (v === 'prev10' || v === 'minutes') setCutoffMode(v);
+    } catch { /* noop */ }
+  }, []);
+  useEffect(() => {
+    try { localStorage.setItem('schedule-relay:propose-cutoff-mode', cutoffMode); } catch { /* noop */ }
+  }, [cutoffMode]);
   const [maxSlots, setMaxSlots] = useState(10);
 
   // カレンダー
@@ -167,7 +178,19 @@ export default function ProposePage() {
   const [loadingCals, setLoadingCals] = useState(true);
 
   // 抽出結果
-  const [slots, setSlots] = useState<SlotDto[]>([]);
+  const [rawSlots, setRawSlots] = useState<SlotDto[]>([]);
+  // cutoffMode === 'prev10' のときは「対象日の前日10:00 JSTを過ぎた候補」を除外
+  const slots = useMemo<SlotDto[]>(() => {
+    if (cutoffMode !== 'prev10') return rawSlots;
+    const now = Date.now();
+    return rawSlots.filter((s) => {
+      const startMs = Date.parse(s.start);
+      const ymd = msToJstYmd(startMs);
+      const dayStartMs = jstDateMs(ymd);
+      const prevDay10amMs = dayStartMs - 24 * 60 * 60 * 1000 + 10 * 60 * 60 * 1000;
+      return now <= prevDay10amMs;
+    });
+  }, [rawSlots, cutoffMode]);
   const [busyByCalendar, setBusyByCalendar] = useState<BusyByCalendar>({});
   const [selectedSlots, setSelectedSlots] = useState<Set<number>>(new Set());
   // 左/中ペインの折りたたみ（カレンダーを最大化したいとき用・localStorage で記憶）
@@ -277,7 +300,7 @@ export default function ProposePage() {
     return () => clearTimeout(t);
     // 設定変更で自動再抽出する依存。selectedCals は Set なのでサイズと内容で監視
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadingCals, periodStart, periodEnd, duration, whStart, whEnd, bufBefore, bufAfter, minNotice, maxSlots, selectedCals]);
+  }, [loadingCals, periodStart, periodEnd, duration, whStart, whEnd, bufBefore, bufAfter, minNotice, maxSlots, selectedCals, cutoffMode]);
 
   // カレンダーID → 色 マップ
   const calColorMap = useMemo(() => {
@@ -289,7 +312,7 @@ export default function ProposePage() {
   async function extract() {
     setExtracting(true);
     setExtractErr(null);
-    setSlots([]);
+    setRawSlots([]);
     setBusyByCalendar({});
     setSelectedSlots(new Set());
     try {
@@ -317,7 +340,7 @@ export default function ProposePage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error?.message || '抽出に失敗しました');
       const got: SlotDto[] = data.slots ?? [];
-      setSlots(got);
+      setRawSlots(got);
       setBusyByCalendar((data.busyByCalendar ?? {}) as BusyByCalendar);
       // 既定で全件選択
       setSelectedSlots(new Set(got.map((_, i) => i)));
@@ -616,8 +639,22 @@ export default function ProposePage() {
 
             <div className="sc-field">
               <label>直前ブロック</label>
-              <select className="sc-select" value={minNotice} onChange={(e) => setMinNotice(Number(e.target.value))}>
-                {[0, 30, 60, 120, 240, 1440].map((m) => <option key={m} value={m}>{m === 1440 ? '24時間前まで' : `${m}分前まで`}</option>)}
+              <select
+                className="sc-select"
+                value={cutoffMode === 'prev10' ? 'prev10' : String(minNotice)}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === 'prev10') setCutoffMode('prev10');
+                  else { setCutoffMode('minutes'); setMinNotice(Number(v)); }
+                }}
+              >
+                <option value="prev10">前日10時まで（既定）</option>
+                <option value="0">直前まで（無し）</option>
+                <option value="30">30分前まで</option>
+                <option value="60">60分前まで</option>
+                <option value="120">2時間前まで</option>
+                <option value="240">4時間前まで</option>
+                <option value="1440">24時間前まで</option>
               </select>
             </div>
 
