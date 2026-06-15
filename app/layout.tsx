@@ -1,5 +1,7 @@
 import type { Metadata } from 'next';
+import Nav from './_components/nav';
 import './globals.css';
+import './scheduler.css';
 
 export const metadata: Metadata = {
   title: 'スケジュール調整くん｜Spir全機能 ＋ リレー型調整',
@@ -10,7 +12,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ja">
-      <body>{children}</body>
+      <body>
+        <Nav />
+        {children}
+      </body>
     </html>
   );
 }

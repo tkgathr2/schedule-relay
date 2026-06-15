@@ -248,3 +248,104 @@
   .sc-propose { grid-template-columns: 1fr; }
   .pp-cal-grid { grid-template-columns: 50px repeat(7, minmax(0, 1fr)); }
 }
+
+/* ===========================================================
+   共通ナビ：3画面タブ（Spir寄せ）
+   =========================================================== */
+.navtabs { display: flex; gap: 4px; align-items: center; }
+.navtab {
+  display: inline-block; padding: 18px 14px; font-size: 14px; font-weight: 600;
+  color: #4b5563; text-decoration: none; border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.navtab:hover { color: #111827; }
+.navtab.active { color: #2563eb; border-bottom-color: #2563eb; }
+@media (max-width: 760px) {
+  .navtabs { gap: 0; }
+  .navtab { padding: 14px 8px; font-size: 12px; }
+}
+
+/* ===========================================================
+   一覧画面共通（/links, /unconfirmed, /confirmed）
+   =========================================================== */
+.sc-list-page { padding: 28px 0 60px; }
+.sc-list-head {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 12px; margin-bottom: 20px;
+}
+.sc-list-head h1 { margin: 0; font-size: 22px; font-weight: 800; }
+.sc-list-head .sub { color: #6b7280; font-size: 13px; margin-top: 4px; }
+.sc-btn-primary {
+  background: #2563eb; color: #fff; border: none; border-radius: 8px;
+  padding: 9px 16px; font-size: 14px; font-weight: 700; cursor: pointer;
+  text-decoration: none; display: inline-block;
+}
+.sc-btn-primary:hover { background: #1d4ed8; }
+.sc-btn-secondary {
+  background: #fff; color: #2563eb; border: 1px solid #2563eb; border-radius: 8px;
+  padding: 8px 14px; font-size: 13px; font-weight: 700; cursor: pointer;
+  text-decoration: none; display: inline-block;
+}
+.sc-btn-secondary:hover { background: #eff6ff; }
+.sc-btn-ghost {
+  background: #fff; color: #374151; border: 1px solid #d1d5db; border-radius: 8px;
+  padding: 6px 12px; font-size: 13px; cursor: pointer;
+}
+.sc-btn-ghost:hover { background: #f9fafb; }
+
+.sc-list-card {
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 12px;
+  overflow: hidden;
+}
+.sc-list-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.sc-list-table thead th {
+  text-align: left; padding: 12px 16px; font-weight: 600;
+  color: #6b7280; font-size: 12px; background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+}
+.sc-list-table tbody td {
+  padding: 14px 16px; border-bottom: 1px solid #f3f4f6; vertical-align: middle;
+}
+.sc-list-table tbody tr:last-child td { border-bottom: none; }
+.sc-list-table tbody tr:hover { background: #fafbfc; }
+.sc-list-table .cell-title { font-weight: 600; color: #111827; }
+.sc-list-table .cell-muted { color: #6b7280; font-size: 12px; }
+.sc-list-table .cell-actions { text-align: right; white-space: nowrap; }
+.sc-list-table code {
+  background: #f3f4f6; padding: 2px 6px; border-radius: 4px; font-size: 12px;
+}
+
+.sc-list-empty {
+  padding: 56px 24px; text-align: center; color: #6b7280;
+}
+.sc-list-empty h3 { margin: 0 0 8px; color: #111827; font-size: 16px; }
+.sc-list-empty p { margin: 0 0 18px; font-size: 13px; }
+
+.sc-icon-btn {
+  background: none; border: none; cursor: pointer; padding: 6px 8px;
+  border-radius: 6px; font-size: 14px; color: #6b7280;
+}
+.sc-icon-btn:hover { background: #f3f4f6; color: #111827; }
+
+.sc-menu-wrap { position: relative; display: inline-block; }
+.sc-menu {
+  position: absolute; right: 0; top: 100%; margin-top: 4px;
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+  min-width: 140px; z-index: 20; padding: 4px 0;
+}
+.sc-menu button {
+  display: block; width: 100%; text-align: left; padding: 8px 14px;
+  background: none; border: none; font-size: 13px; cursor: pointer; color: #374151;
+}
+.sc-menu button:hover { background: #f9fafb; }
+.sc-menu button.danger { color: #dc2626; }
+
+.sc-toast {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+  background: #111827; color: #fff; padding: 10px 18px; border-radius: 8px;
+  font-size: 13px; z-index: 100; opacity: 0; pointer-events: none;
+  transition: opacity 0.2s;
+}
+.sc-toast.show { opacity: 1; }
+

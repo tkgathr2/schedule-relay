@@ -41,16 +41,6 @@ export default function Home() {
 
   return (
     <>
-      <nav className="nav">
-        <div className="wrap navin">
-          <div className="logo"><span className="mark">📅</span>スケジュール調整くん</div>
-          <div className="navright">
-            <span className="sync"><span className="dot-live" />Googleカレンダー同期中</span>
-            <span className="url">schedule.takagi.bz</span>
-          </div>
-        </div>
-      </nav>
-
       <header className="hero">
         <div className="wrap">
           <span className="badge">カレンダーと同期 ・ 1画面で日程調整</span>
