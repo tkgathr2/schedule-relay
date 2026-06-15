@@ -9,6 +9,7 @@ import {
   moveRange,
   resizeEnd,
   nextBusyStart,
+  groupSlots,
 } from '../drag';
 
 const MIN = 60_000;
@@ -144,5 +145,66 @@ describe('nextBusyStart', () => {
     const target = { start: base + 200 * MIN, end: base + 230 * MIN };
     const busies = [{ start: base, end: base + 30 * MIN }];
     expect(nextBusyStart(target, busies)).toBeUndefined();
+  });
+});
+
+describe('groupSlots', () => {
+  it('merges contiguous/overlapping slots into one group', () => {
+    // 10:15-10:45 と 10:30-11:00（重なる）→ 1グループ 10:15-11:00
+    const slots = [
+      { idx: 0, start: base + 75 * MIN, end: base + 105 * MIN }, // 10:15-10:45
+      { idx: 1, start: base + 90 * MIN, end: base + 120 * MIN }, // 10:30-11:00
+    ];
+    const groups = groupSlots(slots);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.start).toBe(base + 75 * MIN);
+    expect(groups[0]!.end).toBe(base + 120 * MIN);
+    expect(groups[0]!.idxs.sort()).toEqual([0, 1]);
+    expect(groups[0]!.tailIdx).toBe(1); // end が最大の slot
+  });
+  it('keeps disjoint slots in separate groups', () => {
+    const slots = [
+      { idx: 0, start: base, end: base + 30 * MIN }, // 09:00-09:30
+      { idx: 1, start: base + 60 * MIN, end: base + 90 * MIN }, // 10:00-10:30
+    ];
+    const groups = groupSlots(slots);
+    expect(groups).toHaveLength(2);
+    expect(groups[0]!.idxs).toEqual([0]);
+    expect(groups[1]!.idxs).toEqual([1]);
+  });
+  it('merges 3 chained slots', () => {
+    const slots = [
+      { idx: 0, start: base, end: base + 30 * MIN },
+      { idx: 1, start: base + 15 * MIN, end: base + 60 * MIN },
+      { idx: 2, start: base + 45 * MIN, end: base + 90 * MIN },
+    ];
+    const groups = groupSlots(slots);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.start).toBe(base);
+    expect(groups[0]!.end).toBe(base + 90 * MIN);
+    expect(groups[0]!.tailIdx).toBe(2);
+  });
+  it('input order does not affect grouping (sorts by start)', () => {
+    const slots = [
+      { idx: 1, start: base + 90 * MIN, end: base + 120 * MIN },
+      { idx: 0, start: base + 75 * MIN, end: base + 105 * MIN },
+    ];
+    const groups = groupSlots(slots);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.idxs.sort()).toEqual([0, 1]);
+  });
+  it('end===start is considered contiguous (end >= next.start)', () => {
+    // 09:00-09:30 と 09:30-10:00 → 1グループ
+    const slots = [
+      { idx: 0, start: base, end: base + 30 * MIN },
+      { idx: 1, start: base + 30 * MIN, end: base + 60 * MIN },
+    ];
+    const groups = groupSlots(slots);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.end).toBe(base + 60 * MIN);
+    expect(groups[0]!.tailIdx).toBe(1);
+  });
+  it('returns empty array for empty input', () => {
+    expect(groupSlots([])).toEqual([]);
   });
 });

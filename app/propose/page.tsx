@@ -8,7 +8,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import '../scheduler.css';
-import { moveRange, resizeEnd, nextBusyStart, hasConflict } from '../../src/domain/drag';
+import { moveRange, resizeEnd, nextBusyStart, hasConflict, groupSlots } from '../../src/domain/drag';
 
 type Calendar = {
   id: string;
@@ -197,14 +197,18 @@ export default function ProposePage() {
   // ドラッグ移動／下端リサイズで変更された候補の上書き値（インデックス→新start/end ISO）
   // 既存slotsを直接変えず、表示・送信時にこのMapで上書き反映する。
   const [slotOverrides, setSlotOverrides] = useState<Record<number, { start: string; end: string }>>({});
-  // 現在ドラッグ中の候補index（ハイライト用）。null=なし
-  const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
+  // 現在ドラッグ中の候補グループ key（ハイライト用）。null=なし
+  // key = グループ内 idx をソートして '_' join したもの（例 "3_5_7"）
+  const [draggingGroupKey, setDraggingGroupKey] = useState<string | null>(null);
   // ドラッグの一時状態（高頻度更新のたびにstateを書かないため ref で保持）
+  // グループ単位でドラッグ。idxs はグループ内の全 slot index、tailIdx は末尾（resize対象）
   const dragRef = useRef<{
-    idx: number;
+    idxs: number[];
+    tailIdx: number;
     mode: 'move' | 'resize';
-    origStartMs: number;
-    origEndMs: number;
+    origs: Record<number, { start: number; end: number }>;
+    groupOrigStartMs: number;
+    groupOrigEndMs: number;
     pointerStartY: number;
     dayYmd: string;
     moved: boolean;
@@ -537,31 +541,48 @@ export default function ProposePage() {
     };
   }, [slots, slotOverrides]);
 
-  // ドラッグ／リサイズ：mousedown→window mousemove/mouseup
+  // ドラッグ／リサイズ：mousedown→window mousemove/mouseup（グループ単位）
+  // - move: グループ内の全 slot を同じ deltaMs で平行移動
+  // - resize: グループの末尾 slot（end が最大）の end だけを延長／短縮
   const startPointerDrag = useCallback(
     (
       e: React.PointerEvent,
-      idx: number,
+      idxs: number[],
+      tailIdx: number,
       mode: 'move' | 'resize',
       dayYmd: string,
-      origStartMs: number,
-      origEndMs: number,
+      groupOrigStartMs: number,
+      groupOrigEndMs: number,
     ) => {
       e.stopPropagation();
       e.preventDefault();
+      // グループ内 slot の orig (start,end) を記録（move 時に全員へ delta を適用するため）
+      const origs: Record<number, { start: number; end: number }> = {};
+      for (const i of idxs) {
+        const s = slots[i];
+        if (!s) continue;
+        const ov = slotOverrides[i];
+        origs[i] = {
+          start: Date.parse(ov?.start ?? s.start),
+          end: Date.parse(ov?.end ?? s.end),
+        };
+      }
+      const groupKey = [...idxs].sort((a, b) => a - b).join('_');
       dragRef.current = {
-        idx,
+        idxs,
+        tailIdx,
         mode,
-        origStartMs,
-        origEndMs,
+        origs,
+        groupOrigStartMs,
+        groupOrigEndMs,
         pointerStartY: e.clientY,
         dayYmd,
         moved: false,
         invalid: false,
       };
-      setDraggingIdx(idx);
+      setDraggingGroupKey(groupKey);
 
-      // その日の busy（他候補 + busy）を収集（ドラッグ衝突判定用）
+      // その日の busy（他候補 + busy）を収集（衝突判定用）。グループ内 slot は除外
       const dayStartMs = jstDateMs(dayYmd);
       const dayEndMs = addDays(dayStartMs, 1);
       const whStartMs = new Date(`${dayYmd}T${whStart}:00+09:00`).getTime();
@@ -576,9 +597,10 @@ export default function ProposePage() {
           busiesSameDay.push({ start: s, end: en });
         }
       }
+      const groupIdxSet = new Set(idxs);
       const otherCandsSameDay: { start: number; end: number }[] = [];
       slots.forEach((s, i) => {
-        if (i === idx) return;
+        if (groupIdxSet.has(i)) return;
         const ov = slotOverrides[i];
         const sMs = Date.parse(ov?.start ?? s.start);
         const eMs = Date.parse(ov?.end ?? s.end);
@@ -599,39 +621,61 @@ export default function ProposePage() {
         const lower = Math.max(dayStartMs, whStartMs);
         const upper = Math.min(dayEndMs, whEndMs);
 
-        let next: { start: number; end: number };
         if (cur.mode === 'move') {
-          next = moveRange(
-            { start: cur.origStartMs, end: cur.origEndMs },
+          // グループ全体に同じ deltaMs を適用。グループの (start,end) で境界クランプ。
+          const groupRange = moveRange(
+            { start: cur.groupOrigStartMs, end: cur.groupOrigEndMs },
             deltaMs,
             lower,
             upper,
             15,
           );
+          // 実際に動いた量（クランプ後）を各 slot に適用
+          const appliedDelta = groupRange.start - cur.groupOrigStartMs;
+          cur.invalid = hasConflict(groupRange, conflictTargets);
+          setSlotOverrides((prev) => {
+            const nextOv = { ...prev };
+            for (const i of cur.idxs) {
+              const o = cur.origs[i];
+              if (!o) continue;
+              const ns = o.start + appliedDelta;
+              const ne = o.end + appliedDelta;
+              nextOv[i] = {
+                start: new Date(ns).toISOString(),
+                end: new Date(ne).toISOString(),
+              };
+            }
+            return nextOv;
+          });
         } else {
+          // リサイズ：末尾 slot の end だけを延長／短縮（方式A）
+          const tailOrig = cur.origs[cur.tailIdx];
+          if (!tailOrig) return;
           const maxEnd = nextBusyStart(
-            { start: cur.origStartMs, end: cur.origStartMs },
+            { start: cur.groupOrigStartMs, end: cur.groupOrigEndMs },
             conflictTargets,
           );
-          next = resizeEnd(
-            { start: cur.origStartMs, end: cur.origEndMs },
+          const next = resizeEnd(
+            { start: tailOrig.start, end: tailOrig.end },
             deltaMs,
             upper,
             duration * 60_000,
             15,
             maxEnd,
           );
+          // 衝突判定はグループ全体（start = groupOrigStart, end = next.end）で
+          cur.invalid = hasConflict(
+            { start: cur.groupOrigStartMs, end: next.end },
+            conflictTargets,
+          );
+          setSlotOverrides((prev) => ({
+            ...prev,
+            [cur.tailIdx]: {
+              start: new Date(next.start).toISOString(),
+              end: new Date(next.end).toISOString(),
+            },
+          }));
         }
-        cur.invalid = hasConflict(next, conflictTargets);
-
-        // override を即時反映（ドラッグ中も描画が追随）
-        setSlotOverrides((prev) => ({
-          ...prev,
-          [idx]: {
-            start: new Date(next.start).toISOString(),
-            end: new Date(next.end).toISOString(),
-          },
-        }));
       };
 
       const onUp = () => {
@@ -643,30 +687,40 @@ export default function ProposePage() {
         if (cur.invalid) {
           setSlotOverrides((prev) => {
             const next = { ...prev };
-            // 元の override がなかった場合は entry を削除
-            const s = slots[cur.idx];
-            if (s && Date.parse(s.start) === cur.origStartMs && Date.parse(s.end) === cur.origEndMs) {
-              delete next[cur.idx];
-            } else {
-              next[cur.idx] = {
-                start: new Date(cur.origStartMs).toISOString(),
-                end: new Date(cur.origEndMs).toISOString(),
-              };
+            const targetIdxs = cur.mode === 'resize' ? [cur.tailIdx] : cur.idxs;
+            for (const i of targetIdxs) {
+              const o = cur.origs[i];
+              const s = slots[i];
+              if (!o || !s) continue;
+              // 元の slot と orig が一致していれば override を消す
+              if (Date.parse(s.start) === o.start && Date.parse(s.end) === o.end) {
+                delete next[i];
+              } else {
+                next[i] = {
+                  start: new Date(o.start).toISOString(),
+                  end: new Date(o.end).toISOString(),
+                };
+              }
             }
             return next;
           });
         }
-        // クリック扱い（3px未満）なら選択トグル
+        // クリック扱い（3px未満）なら、グループ内 全 slot を一括選択／解除
         if (!cur.moved && cur.mode === 'move') {
           setSelectedSlots((prev) => {
             const ns = new Set(prev);
-            if (ns.has(cur.idx)) ns.delete(cur.idx);
-            else ns.add(cur.idx);
+            // 全部選択済みなら一括解除、そうでなければ全部選択
+            const allOn = cur.idxs.every((i) => ns.has(i));
+            if (allOn) {
+              for (const i of cur.idxs) ns.delete(i);
+            } else {
+              for (const i of cur.idxs) ns.add(i);
+            }
             return ns;
           });
         }
         dragRef.current = null;
-        setDraggingIdx(null);
+        setDraggingGroupKey(null);
       };
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);
@@ -960,30 +1014,35 @@ export default function ProposePage() {
                             </div>
                           );
                         })}
-                        {/* 候補ブロック：個別にドラッグ移動／下端リサイズ可能。
-                            Spirと同じくクリック（移動量<3px）でトグル選択。 */}
-                        {cand.map((c) => {
-                          const top = msToTopPx(c.start, d.ymd);
-                          const height = durationMsToHeightPx(c.start, c.end, d.ymd);
+                        {/* 候補ブロック：連続/重なる候補を1グループに統合して1つの大きな
+                            青点線ブロックとして描画（Spirと同じUX）。
+                            - クリック（移動量<3px）：グループ内全 slot を一括選択／解除
+                            - ドラッグ：グループ全体を平行移動
+                            - 下端リサイズ：グループ末尾 slot の end のみ延長／短縮 */}
+                        {groupSlots(cand).map((g) => {
+                          const top = msToTopPx(g.start, d.ymd);
+                          const height = durationMsToHeightPx(g.start, g.end, d.ymd);
                           if (height <= 0) return null;
-                          const on = selectedSlots.has(c.idx);
-                          const isDragging = draggingIdx === c.idx;
+                          const groupKey = [...g.idxs].sort((a, b) => a - b).join('_');
+                          const on = g.idxs.every((i) => selectedSlots.has(i));
+                          const isDragging = draggingGroupKey === groupKey;
                           const invalid = isDragging && dragRef.current?.invalid;
-                          const startStr = new Date(c.start).toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
-                          const endStr = new Date(c.end).toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
+                          const startStr = new Date(g.start).toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
+                          const endStr = new Date(g.end).toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
+                          const countLabel = g.idxs.length > 1 ? `候補（${g.idxs.length}件）` : '候補';
                           return (
                             <div
-                              key={`c${c.idx}`}
+                              key={`g${groupKey}`}
                               className={`pp-cal-cand ${on ? 'on' : ''}${isDragging ? ' dragging' : ''}${invalid ? ' invalid' : ''}`}
                               style={{ top, height }}
-                              onPointerDown={(e) => startPointerDrag(e, c.idx, 'move', d.ymd, c.start, c.end)}
+                              onPointerDown={(e) => startPointerDrag(e, g.idxs, g.tailIdx, 'move', d.ymd, g.start, g.end)}
                               title={`${startStr}-${endStr}（ドラッグで移動・下端で延長）`}
                             >
-                              <div className="pp-cal-cand-label">候補</div>
                               <div className="pp-cal-cand-time">{startStr}-{endStr}</div>
+                              <div className="pp-cal-cand-label">{countLabel}</div>
                               <div
                                 className="pp-cal-cand-resize"
-                                onPointerDown={(e) => startPointerDrag(e, c.idx, 'resize', d.ymd, c.start, c.end)}
+                                onPointerDown={(e) => startPointerDrag(e, g.idxs, g.tailIdx, 'resize', d.ymd, g.start, g.end)}
                                 title="ドラッグで時間を延長／短縮"
                               />
                             </div>

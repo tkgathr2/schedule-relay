@@ -97,3 +97,39 @@ export function nextBusyStart(target: Range, busies: Range[]): number | undefine
   }
   return best;
 }
+
+/**
+ * 候補slot群を「連続/重なる」グループにまとめる。
+ * - 入力 slots は {idx, start, end}（同じ日のもの想定）
+ * - start 昇順にソートしてから、隣接 last.end >= s.start で同グループに統合
+ * - グループ end = グループ内 slot の end の最大値
+ * - tailIdx = グループ内で「end が最大」の slot の idx（リサイズで延長する対象）
+ *
+ * これにより、Spirと同じく連続候補が1つの大きな青点線ブロックとして描画でき、
+ * グループ単位で move／resize できる。
+ */
+export type SlotWithIdx = { idx: number; start: number; end: number };
+export type SlotGroup = {
+  start: number;
+  end: number;
+  idxs: number[];
+  tailIdx: number;
+};
+export function groupSlots(slots: SlotWithIdx[]): SlotGroup[] {
+  const sorted = [...slots].sort((a, b) => a.start - b.start || a.end - b.end);
+  const groups: SlotGroup[] = [];
+  for (const s of sorted) {
+    const last = groups[groups.length - 1];
+    if (last && last.end >= s.start) {
+      // 統合：end は最大値、tailIdx は end が最大の slot
+      if (s.end > last.end) {
+        last.end = s.end;
+        last.tailIdx = s.idx;
+      }
+      last.idxs.push(s.idx);
+    } else {
+      groups.push({ start: s.start, end: s.end, idxs: [s.idx], tailIdx: s.idx });
+    }
+  }
+  return groups;
+}
