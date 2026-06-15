@@ -1029,7 +1029,7 @@ export default function ProposePage() {
                           const invalid = isDragging && dragRef.current?.invalid;
                           const startStr = new Date(g.start).toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
                           const endStr = new Date(g.end).toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
-                          const countLabel = g.idxs.length > 1 ? `候補（${g.idxs.length}件）` : '候補';
+                          const countLabel = '候補';
                           return (
                             <div
                               key={`g${groupKey}`}
