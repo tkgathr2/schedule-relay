@@ -8,6 +8,7 @@ import { liveAvailabilityForPage, resolveSettings } from '@/service/booking';
 import { googleConfigFromEnv, googleFreeBusy } from '@/service/calendar/google';
 import { ServiceError } from '@/service/errors';
 import { jsonError, slotToDto } from '@/service/http';
+import { assertValidSlug } from '@/service/security';
 import type { Interval } from '@/domain/types';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -18,6 +19,7 @@ export async function GET(
 ): Promise<NextResponse> {
   try {
     const { slug } = await ctx.params;
+    assertValidSlug(slug);
     const repo = getRepository();
     const page = await repo.getPageBySlug(slug);
     if (!page || !page.isActive) throw new ServiceError('NOT_FOUND', '予約ページが見つかりません');

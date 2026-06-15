@@ -19,6 +19,7 @@ import { googleConfigFromEnv, googleFreeBusy, googleFreeBusyByCalendar, googleEv
 import { proposeSlots } from '@/service/propose';
 import { ServiceError } from '@/service/errors';
 import { jsonError, slotToDto } from '@/service/http';
+import { rateLimit } from '@/service/rate-limit';
 import type { WorkingHours } from '@/domain/working-hours';
 
 function parseTime(v: unknown): number | null {
@@ -33,6 +34,10 @@ function parseTime(v: unknown): number | null {
 
 export async function POST(req: Request): Promise<NextResponse> {
   try {
+    // Rate limit: 30 req / 60s / IP（Google Calendar API 浪費/DoS 抑止）
+    const blocked = rateLimit(req, 'availability:propose', 30, 60);
+    if (blocked) return blocked;
+
     const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
     if (!body) throw new ServiceError('VALIDATION', 'JSON ボディが必要です');
 

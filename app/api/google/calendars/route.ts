@@ -5,9 +5,14 @@
 import { NextResponse } from 'next/server';
 import { googleConfigFromEnv, listGoogleCalendars } from '@/service/calendar/google';
 import { jsonError } from '@/service/http';
+import { rateLimit } from '@/service/rate-limit';
 
-export async function GET(): Promise<NextResponse> {
+export async function GET(req: Request): Promise<NextResponse> {
   try {
+    // Rate limit: 60 req / 60s / IP
+    const blocked = rateLimit(req, 'google:calendars', 60, 60);
+    if (blocked) return blocked;
+
     const cfg = googleConfigFromEnv();
     if (!cfg) return NextResponse.json({ calendars: [] });
     const calendars = await listGoogleCalendars(cfg);
