@@ -36,10 +36,17 @@ export default function LinksPage() {
 
   const load = useCallback(async () => {
     try {
-      const r = await fetch(`/api/pages?organizerId=${ORGANIZER_ID}`);
+      const r = await fetch(`/api/pages?organizerId=${ORGANIZER_ID}`, { cache: 'no-store' });
       if (!r.ok) throw new Error(`status ${r.status}`);
       const j = (await r.json()) as { pages: PageRow[] };
-      setPages(j.pages);
+      // 二重防御：化け文字（U+FFFD = ）を含むタイトルはDB側のレガシー破損データ
+      // なので一覧に出さない（API側 isActive=true フィルタとは別の保険）
+      const clean = (j.pages || []).filter((p) => {
+        const t = (p.settings as { title?: unknown } | null | undefined)?.title;
+        if (typeof t !== 'string') return true;
+        return !t.includes('�');
+      });
+      setPages(clean);
     } catch (e) {
       setErr(e instanceof Error ? e.message : '読み込みに失敗しました');
       setPages([]);

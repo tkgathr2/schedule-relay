@@ -42,10 +42,16 @@ export default function ConfirmedPage() {
     try {
       const params = new URLSearchParams({ organizerId: ORGANIZER_ID });
       if (!showPast) params.set('from', todayJstYmd());
-      const r = await fetch(`/api/confirmations?${params.toString()}`);
+      const r = await fetch(`/api/confirmations?${params.toString()}`, { cache: 'no-store' });
       if (!r.ok) throw new Error(`status ${r.status}`);
       const j = (await r.json()) as { confirmations: ConfRow[] };
-      setConfs(j.confirmations);
+      // 化け文字（U+FFFD）を含む title はレガシー破損データ扱いで一覧から除外
+      const clean = (j.confirmations || []).filter((c) => {
+        const t = (c as unknown as { title?: unknown }).title;
+        if (typeof t !== 'string') return true;
+        return !t.includes('�');
+      });
+      setConfs(clean);
     } catch (e) {
       setErr(e instanceof Error ? e.message : '読み込みに失敗しました');
       setConfs([]);

@@ -34,10 +34,16 @@ export default function UnconfirmedPage() {
 
   const load = useCallback(async () => {
     try {
-      const r = await fetch('/api/events?status=open|holding');
+      const r = await fetch('/api/events?status=open|holding', { cache: 'no-store' });
       if (!r.ok) throw new Error(`status ${r.status}`);
       const j = (await r.json()) as { events: EventRow[] };
-      setEvents(j.events);
+      // 化け文字（U+FFFD）を含む title はレガシー破損データ扱いで一覧から除外
+      const clean = (j.events || []).filter((ev) => {
+        const t = (ev as unknown as { settings?: { title?: unknown } }).settings?.title;
+        if (typeof t !== 'string') return true;
+        return !t.includes('�');
+      });
+      setEvents(clean);
     } catch (e) {
       setErr(e instanceof Error ? e.message : '読み込みに失敗しました');
       setEvents([]);
