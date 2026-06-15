@@ -157,6 +157,46 @@ model Resource {
   capacity Int    @default(1)
 }
 
+/// 🔴 リレー型 T6 候補リンク（A→B→C 順番調整・Spirとの差別化機能）。
+/// 採用面接など「一次面接担当A → 二次面接担当B → 最終面接担当C」を、
+/// 順番付き連続候補で確保するためのリンク。Linkテーブル(BookingPage)とは独立した
+/// 軽量モデル（複数owner・stages JSON）。仮押さえはGoogle側に provisional ホールド。
+model RelayLink {
+  id              String   @id @default(cuid())
+  slug            String   @unique
+  title           String
+  durationMinutes Int
+  /// [{order:1,label:"A",ownerEmail:"a@…",calendarIds:["primary"]}, ...]
+  stages          Json
+  bufferMinutes   Int      @default(15)
+  maxGapDays      Int      @default(14)
+  startDate       DateTime?
+  endDate         DateTime?
+  status          String   @default("open") // open | closed
+  createdAt       DateTime @default(now())
+  holds           RelayLinkHold[]
+}
+
+/// リレー仮押さえ。order=stage番号、各ステージ枠1行ずつ。
+/// 同一RelayLink内のdedupは (relayLinkId, stageOrder, startAt) のユニークで担保。
+model RelayLinkHold {
+  id            String    @id @default(cuid())
+  relayLinkId   String
+  relayLink    RelayLink @relation(fields: [relayLinkId], references: [id])
+  stageOrder    Int
+  stageLabel    String
+  ownerEmail    String
+  startAt       DateTime
+  endAt         DateTime
+  /// Googleカレンダーイベントを作った場合のID（degrade-safe: null可）
+  googleEventId String?
+  status        String    @default("provisional") // provisional | released | confirmed
+  createdAt     DateTime  @default(now())
+
+  @@unique([relayLinkId, stageOrder, startAt])
+  @@index([relayLinkId])
+}
+
 model AuditLog {
   id      String   @id @default(cuid())
   eventId String?

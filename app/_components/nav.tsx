@@ -11,6 +11,7 @@ type Tab = { href: string; label: string; match: (p: string) => boolean };
 const TABS: Tab[] = [
   { href: '/links', label: '空き時間リンク', match: (p) => p === '/' || p.startsWith('/links') },
   { href: '/calendar', label: 'カレンダー', match: (p) => p.startsWith('/calendar') },
+  { href: '/relay/new', label: 'リレー新規', match: (p) => p.startsWith('/relay') },
   { href: '/unconfirmed', label: '未確定の調整', match: (p) => p.startsWith('/unconfirmed') },
   { href: '/confirmed', label: '確定済の予定', match: (p) => p.startsWith('/confirmed') },
 ];
