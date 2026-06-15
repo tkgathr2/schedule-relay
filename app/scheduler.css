@@ -207,15 +207,17 @@
 .pp-cal-busy .pp-cal-busy-title { font-weight: 600; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
 .pp-cal-busy .pp-cal-busy-time { font-size: 10px; opacity: 0.65; }
 
-/* 候補ブロック（Spirと同じ：色なし・shadowなし・青点線とラベルだけ） */
-.pp-cal-cand { position: absolute; left: 4px; right: 4px; border: 1.5px dashed #2563eb; border-radius: 4px;
-  background: transparent; padding: 3px 6px; box-sizing: border-box;
-  font-size: 11px; line-height: 1.25; color: #2563eb; cursor: pointer; transition: background .1s;
-  z-index: 5; }
-.pp-cal-cand:hover { background: rgba(37, 99, 235, 0.04); }
-.pp-cal-cand.on { background: rgba(37, 99, 235, 0.10); border-style: solid; border-color: #1d4ed8; color: #1e3a8a; }
-.pp-cal-cand .pp-cal-cand-label { font-weight: 700; font-size: 10px; letter-spacing: 0.3px; }
-.pp-cal-cand .pp-cal-cand-time { font-size: 11px; font-weight: 600; }
+/* 候補ブロック（Spir 7/6 16:00-18:00 と同じ：白抜き＋青点線＋時刻上・候補下・薄影） */
+.pp-cal-cand { position: absolute; left: 4px; right: 4px; border: 2px dashed #2563eb; border-radius: 4px;
+  background: #ffffff; padding: 4px 8px; box-sizing: border-box;
+  font-size: 11px; line-height: 1.3; color: #2563eb; cursor: pointer; transition: background .12s, box-shadow .12s;
+  z-index: 5; box-shadow: 0 1px 3px rgba(37, 99, 235, 0.08);
+  display: flex; flex-direction: column; gap: 1px; align-items: flex-start; }
+.pp-cal-cand:hover { background: #f8faff; box-shadow: 0 2px 6px rgba(37, 99, 235, 0.16); }
+.pp-cal-cand.on { background: #eff6ff; border-style: solid; border-color: #1d4ed8; color: #1e3a8a; }
+/* 時刻を上に・候補ラベルを下に（DOM順は変えない・flex order で配置） */
+.pp-cal-cand .pp-cal-cand-time { font-size: 11px; font-weight: 600; order: 1; }
+.pp-cal-cand .pp-cal-cand-label { font-weight: 700; font-size: 13px; letter-spacing: 0.3px; order: 2; }
 
 /* 凡例 */
 .pp-cal-legend { display: flex; gap: 12px; justify-content: flex-end; margin-top: 10px; font-size: 11px; color: #6b7280; flex-wrap: wrap; }
