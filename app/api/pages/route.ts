@@ -20,7 +20,10 @@ export async function GET(req: Request): Promise<NextResponse> {
       throw new ServiceError('VALIDATION', 'organizerId は必須です');
     }
     const repo = getRepository();
-    const pages = await repo.listPagesByOrganizer(organizerId);
+    const all = await repo.listPagesByOrganizer(organizerId);
+    // 既定で isActive=true のみ返す。?includeInactive=1 で全件。
+    const includeInactive = url.searchParams.get('includeInactive') === '1';
+    const pages = includeInactive ? all : all.filter((p) => p.isActive);
     return NextResponse.json({ pages });
   } catch (e) {
     return jsonError(e);
