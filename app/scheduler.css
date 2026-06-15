@@ -214,14 +214,23 @@
 /* 候補ブロック（Spir 7/6 16:00-18:00 と同じ：白抜き＋青点線＋時刻上・候補下・薄影） */
 .pp-cal-cand { position: absolute; left: 4px; right: 4px; border: 2px dashed #2563eb; border-radius: 4px;
   background: #ffffff; padding: 4px 8px; box-sizing: border-box;
-  font-size: 11px; line-height: 1.3; color: #2563eb; cursor: pointer; transition: background .12s, box-shadow .12s;
+  font-size: 11px; line-height: 1.3; color: #2563eb; cursor: grab; transition: background .12s, box-shadow .12s, border-color .12s;
   z-index: 5; box-shadow: 0 1px 3px rgba(37, 99, 235, 0.08);
-  display: flex; flex-direction: column; gap: 1px; align-items: flex-start; }
+  display: flex; flex-direction: column; gap: 1px; align-items: flex-start;
+  user-select: none; touch-action: none; }
 .pp-cal-cand:hover { background: #f8faff; box-shadow: 0 2px 6px rgba(37, 99, 235, 0.16); }
 .pp-cal-cand.on { background: #eff6ff; border-style: solid; border-color: #1d4ed8; color: #1e3a8a; }
+.pp-cal-cand.dragging { cursor: grabbing; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25); opacity: 0.95; }
+.pp-cal-cand.invalid { border-color: #dc2626; background: #fef2f2; color: #991b1b; }
 /* 時刻を上に・候補ラベルを下に（DOM順は変えない・flex order で配置） */
 .pp-cal-cand .pp-cal-cand-time { font-size: 11px; font-weight: 600; order: 1; }
 .pp-cal-cand .pp-cal-cand-label { font-weight: 700; font-size: 13px; letter-spacing: 0.3px; order: 2; }
+/* 下端リサイズハンドル */
+.pp-cal-cand-resize { position: absolute; left: 0; right: 0; bottom: 0; height: 8px;
+  cursor: ns-resize; background: transparent; transition: background .12s;
+  border-bottom-left-radius: 2px; border-bottom-right-radius: 2px; z-index: 6; }
+.pp-cal-cand-resize:hover { background: rgba(37, 99, 235, 0.25); }
+.pp-cal-cand.dragging .pp-cal-cand-resize { background: rgba(37, 99, 235, 0.35); }
 
 /* 凡例 */
 .pp-cal-legend { display: flex; gap: 12px; justify-content: flex-end; margin-top: 10px; font-size: 11px; color: #6b7280; flex-wrap: wrap; }

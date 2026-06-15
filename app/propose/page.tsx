@@ -6,8 +6,9 @@
  * 右：Spir風 週カレンダーグリッド（既存予定=色付きブロック / 候補=青点線オーバーレイ）
  *     候補ブロッククリックで個別トグル → 「この候補を反映」で予約ページ作成
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import '../scheduler.css';
+import { moveRange, resizeEnd, nextBusyStart, hasConflict } from '../../src/domain/drag';
 
 type Calendar = {
   id: string;
@@ -193,6 +194,22 @@ export default function ProposePage() {
   }, [rawSlots, cutoffMode]);
   const [busyByCalendar, setBusyByCalendar] = useState<BusyByCalendar>({});
   const [selectedSlots, setSelectedSlots] = useState<Set<number>>(new Set());
+  // ドラッグ移動／下端リサイズで変更された候補の上書き値（インデックス→新start/end ISO）
+  // 既存slotsを直接変えず、表示・送信時にこのMapで上書き反映する。
+  const [slotOverrides, setSlotOverrides] = useState<Record<number, { start: string; end: string }>>({});
+  // 現在ドラッグ中の候補index（ハイライト用）。null=なし
+  const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
+  // ドラッグの一時状態（高頻度更新のたびにstateを書かないため ref で保持）
+  const dragRef = useRef<{
+    idx: number;
+    mode: 'move' | 'resize';
+    origStartMs: number;
+    origEndMs: number;
+    pointerStartY: number;
+    dayYmd: string;
+    moved: boolean;
+    invalid: boolean;
+  } | null>(null);
   // 左/中ペインの折りたたみ（カレンダーを最大化したいとき用・localStorage で記憶）
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [midCollapsed, setMidCollapsed] = useState(false);
@@ -386,10 +403,10 @@ export default function ProposePage() {
       if (adjType === 'T3') {
         setDoneVoteUrl(`${origin}/v/${data.page?.id ?? slug}`);
       }
-      // メール本文用テキスト
+      // メール本文用テキスト（ドラッグ/リサイズで動かした候補は effectiveSlots に反映済み）
       const lines = Array.from(selectedSlots)
         .sort((a, b) => a - b)
-        .map((i) => slots[i])
+        .map((i) => effectiveSlots[i])
         .filter((s): s is SlotDto => !!s)
         .map((s) => `・${fmtSlotJa(s.start, s.end)}`);
       setCopyText(
@@ -503,21 +520,169 @@ export default function ProposePage() {
     };
   }, [busyByCalendar]);
 
-  // 表示週・各日に該当する候補
+  // 表示週・各日に該当する候補（override 反映済）
   const candForDay = useMemo(() => {
     return (ymd: string): { idx: number; start: number; end: number }[] => {
       const dayStart = jstDateMs(ymd);
       const dayEnd = addDays(dayStart, 1);
       const out: { idx: number; start: number; end: number }[] = [];
       slots.forEach((s, i) => {
-        const sMs = Date.parse(s.start);
-        const eMs = Date.parse(s.end);
+        const ov = slotOverrides[i];
+        const sMs = Date.parse(ov?.start ?? s.start);
+        const eMs = Date.parse(ov?.end ?? s.end);
         if (eMs <= dayStart || sMs >= dayEnd) return;
         out.push({ idx: i, start: sMs, end: eMs });
       });
       return out;
     };
-  }, [slots]);
+  }, [slots, slotOverrides]);
+
+  // ドラッグ／リサイズ：mousedown→window mousemove/mouseup
+  const startPointerDrag = useCallback(
+    (
+      e: React.PointerEvent,
+      idx: number,
+      mode: 'move' | 'resize',
+      dayYmd: string,
+      origStartMs: number,
+      origEndMs: number,
+    ) => {
+      e.stopPropagation();
+      e.preventDefault();
+      dragRef.current = {
+        idx,
+        mode,
+        origStartMs,
+        origEndMs,
+        pointerStartY: e.clientY,
+        dayYmd,
+        moved: false,
+        invalid: false,
+      };
+      setDraggingIdx(idx);
+
+      // その日の busy（他候補 + busy）を収集（ドラッグ衝突判定用）
+      const dayStartMs = jstDateMs(dayYmd);
+      const dayEndMs = addDays(dayStartMs, 1);
+      const whStartMs = new Date(`${dayYmd}T${whStart}:00+09:00`).getTime();
+      const whEndMs = new Date(`${dayYmd}T${whEnd}:00+09:00`).getTime();
+
+      const busiesSameDay: { start: number; end: number }[] = [];
+      for (const calId of Object.keys(busyByCalendar)) {
+        for (const b of busyByCalendar[calId] ?? []) {
+          const s = Date.parse(b.start);
+          const en = Date.parse(b.end);
+          if (en <= dayStartMs || s >= dayEndMs) continue;
+          busiesSameDay.push({ start: s, end: en });
+        }
+      }
+      const otherCandsSameDay: { start: number; end: number }[] = [];
+      slots.forEach((s, i) => {
+        if (i === idx) return;
+        const ov = slotOverrides[i];
+        const sMs = Date.parse(ov?.start ?? s.start);
+        const eMs = Date.parse(ov?.end ?? s.end);
+        if (eMs <= dayStartMs || sMs >= dayEndMs) return;
+        otherCandsSameDay.push({ start: sMs, end: eMs });
+      });
+      const conflictTargets = [...busiesSameDay, ...otherCandsSameDay];
+
+      const onMove = (ev: PointerEvent) => {
+        const cur = dragRef.current;
+        if (!cur) return;
+        const deltaPx = ev.clientY - cur.pointerStartY;
+        if (Math.abs(deltaPx) >= 3) cur.moved = true;
+        const deltaMin = (deltaPx / SLOT_PX) * 60;
+        const deltaMs = deltaMin * 60_000;
+
+        // 営業時間境界（候補は WH 内に収まる前提）
+        const lower = Math.max(dayStartMs, whStartMs);
+        const upper = Math.min(dayEndMs, whEndMs);
+
+        let next: { start: number; end: number };
+        if (cur.mode === 'move') {
+          next = moveRange(
+            { start: cur.origStartMs, end: cur.origEndMs },
+            deltaMs,
+            lower,
+            upper,
+            15,
+          );
+        } else {
+          const maxEnd = nextBusyStart(
+            { start: cur.origStartMs, end: cur.origStartMs },
+            conflictTargets,
+          );
+          next = resizeEnd(
+            { start: cur.origStartMs, end: cur.origEndMs },
+            deltaMs,
+            upper,
+            duration * 60_000,
+            15,
+            maxEnd,
+          );
+        }
+        cur.invalid = hasConflict(next, conflictTargets);
+
+        // override を即時反映（ドラッグ中も描画が追随）
+        setSlotOverrides((prev) => ({
+          ...prev,
+          [idx]: {
+            start: new Date(next.start).toISOString(),
+            end: new Date(next.end).toISOString(),
+          },
+        }));
+      };
+
+      const onUp = () => {
+        const cur = dragRef.current;
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        if (!cur) return;
+        // 衝突状態で離したら元に戻す（赤枠で弾く）
+        if (cur.invalid) {
+          setSlotOverrides((prev) => {
+            const next = { ...prev };
+            // 元の override がなかった場合は entry を削除
+            const s = slots[cur.idx];
+            if (s && Date.parse(s.start) === cur.origStartMs && Date.parse(s.end) === cur.origEndMs) {
+              delete next[cur.idx];
+            } else {
+              next[cur.idx] = {
+                start: new Date(cur.origStartMs).toISOString(),
+                end: new Date(cur.origEndMs).toISOString(),
+              };
+            }
+            return next;
+          });
+        }
+        // クリック扱い（3px未満）なら選択トグル
+        if (!cur.moved && cur.mode === 'move') {
+          setSelectedSlots((prev) => {
+            const ns = new Set(prev);
+            if (ns.has(cur.idx)) ns.delete(cur.idx);
+            else ns.add(cur.idx);
+            return ns;
+          });
+        }
+        dragRef.current = null;
+        setDraggingIdx(null);
+      };
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    },
+    [busyByCalendar, slots, slotOverrides, whStart, whEnd, duration],
+  );
+
+  // /api/pages 送信用：override を反映した slot 配列
+  // （現状の applySelected はメール本文しか slots を使わないが、将来の送信ペイロードにも使う）
+  const effectiveSlots = useMemo<SlotDto[]>(() => {
+    return slots.map((s, i) => {
+      const ov = slotOverrides[i];
+      if (ov) return { start: ov.start, end: ov.end };
+      return s;
+    });
+  }, [slots, slotOverrides]);
 
   return (
     <div className="sc-wrap">
@@ -795,55 +960,35 @@ export default function ProposePage() {
                             </div>
                           );
                         })}
-                        {/* 候補ブロック：重なり/隣接する候補を1グループに統合し、
-                            Spirと同じく「空き時間帯全体を1つの大きな青枠」として描画。
-                            枠全体クリックでグループ内の全slotを一括選択/解除。 */}
-                        {(() => {
-                          const sortedCand = [...cand].sort((a, b) => a.start - b.start);
-                          const groups: { start: number; end: number; slots: typeof sortedCand }[] = [];
-                          for (const c of sortedCand) {
-                            const last = groups[groups.length - 1];
-                            if (last && last.end >= c.start) {
-                              last.end = Math.max(last.end, c.end);
-                              last.slots.push(c);
-                            } else {
-                              groups.push({ start: c.start, end: c.end, slots: [c] });
-                            }
-                          }
-                          return groups.map((g, gi) => {
-                            const top = msToTopPx(g.start, d.ymd);
-                            const height = durationMsToHeightPx(g.start, g.end, d.ymd);
-                            if (height <= 0) return null;
-                            const onCount = g.slots.filter((s) => selectedSlots.has(s.idx)).length;
-                            const allOn = onCount === g.slots.length;
-                            const startStr = new Date(g.start).toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
-                            const endStr = new Date(g.end).toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
-                            const handleClick = () => {
-                              setSelectedSlots((prev) => {
-                                const next = new Set(prev);
-                                if (allOn) {
-                                  for (const s of g.slots) next.delete(s.idx);
-                                } else {
-                                  for (const s of g.slots) next.add(s.idx);
-                                }
-                                return next;
-                              });
-                            };
-                            return (
-                              <button
-                                key={`cg${gi}`}
-                                type="button"
-                                className={`pp-cal-cand ${allOn ? 'on' : ''}`}
-                                style={{ top, height }}
-                                onClick={handleClick}
-                                title={`${startStr}-${endStr}`}
-                              >
-                                <div className="pp-cal-cand-label">候補</div>
-                                <div className="pp-cal-cand-time">{startStr}-{endStr}</div>
-                              </button>
-                            );
-                          });
-                        })()}
+                        {/* 候補ブロック：個別にドラッグ移動／下端リサイズ可能。
+                            Spirと同じくクリック（移動量<3px）でトグル選択。 */}
+                        {cand.map((c) => {
+                          const top = msToTopPx(c.start, d.ymd);
+                          const height = durationMsToHeightPx(c.start, c.end, d.ymd);
+                          if (height <= 0) return null;
+                          const on = selectedSlots.has(c.idx);
+                          const isDragging = draggingIdx === c.idx;
+                          const invalid = isDragging && dragRef.current?.invalid;
+                          const startStr = new Date(c.start).toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
+                          const endStr = new Date(c.end).toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
+                          return (
+                            <div
+                              key={`c${c.idx}`}
+                              className={`pp-cal-cand ${on ? 'on' : ''}${isDragging ? ' dragging' : ''}${invalid ? ' invalid' : ''}`}
+                              style={{ top, height }}
+                              onPointerDown={(e) => startPointerDrag(e, c.idx, 'move', d.ymd, c.start, c.end)}
+                              title={`${startStr}-${endStr}（ドラッグで移動・下端で延長）`}
+                            >
+                              <div className="pp-cal-cand-label">候補</div>
+                              <div className="pp-cal-cand-time">{startStr}-{endStr}</div>
+                              <div
+                                className="pp-cal-cand-resize"
+                                onPointerDown={(e) => startPointerDrag(e, c.idx, 'resize', d.ymd, c.start, c.end)}
+                                title="ドラッグで時間を延長／短縮"
+                              />
+                            </div>
+                          );
+                        })}
                       </div>
                     );
                   })}
