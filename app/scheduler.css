@@ -45,6 +45,10 @@
 .sc-field label { display: block; font-size: 12.5px; font-weight: 600; margin-bottom: 6px; }
 .sc-field .req { color: #dc2626; margin-left: 3px; }
 .sc-field .opt { color: #9ca3af; font-weight: 500; font-size: 11px; margin-left: 4px; }
+.pp-period-presets { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.pp-period-presets button { background: #fff; border: 1px solid #d1d5db; border-radius: 4px; padding: 4px 9px; font-size: 11.5px; color: #4b5563; cursor: pointer; transition: background .12s, border-color .12s; }
+.pp-period-presets button:hover { background: #eff6ff; border-color: #2563eb; color: #1d4ed8; }
+.pp-period-presets button:active { background: #dbeafe; }
 .sc-input, .sc-select, .sc-textarea { width: 100%; border: 1px solid var(--sc-line); border-radius: 9px;
   padding: 10px 12px; font-size: 14px; background: #fff; color: var(--sc-ink); }
 .sc-input:focus, .sc-select:focus, .sc-textarea:focus { outline: none; border-color: var(--sc-brand);

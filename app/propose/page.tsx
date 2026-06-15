@@ -136,7 +136,24 @@ export default function ProposePage() {
   const [adjType, setAdjType] = useState<'T2' | 'T3'>('T2');
   const [duration, setDuration] = useState(30);
   const [periodStart, setPeriodStart] = useState(plusDaysIso(1));
-  const [periodEnd, setPeriodEnd] = useState(plusDaysIso(14));
+  const [periodEnd, setPeriodEnd] = useState(plusDaysIso(30));
+  // 終了日プリセット：開始日から N 日後 ／ 来週末（次の日曜まで＋7日）
+  function setEndOffsetDays(days: number) {
+    const base = jstDateMs(periodStart);
+    const target = new Date(base + days * 24 * 60 * 60 * 1000);
+    setPeriodEnd(msToJstYmd(target.getTime()));
+  }
+  function setEndNextWeekend() {
+    // 「来週末」＝開始日が含まれる週の次の週の日曜（JST）
+    const baseMs = jstDateMs(periodStart);
+    const dowJa = new Intl.DateTimeFormat('en-US', { timeZone: TZ, weekday: 'short' }).format(new Date(baseMs));
+    const dowMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+    const dow = dowMap[dowJa] ?? 0;
+    // 今週の日曜まで (7 - dow) 日。来週末＝今週日曜 + 7日。0(日)なら +7
+    const daysUntilNextSun = dow === 0 ? 7 : 7 - dow + 7;
+    const target = baseMs + daysUntilNextSun * 24 * 60 * 60 * 1000;
+    setPeriodEnd(msToJstYmd(target));
+  }
   const [whStart, setWhStart] = useState('09:00');
   const [whEnd, setWhEnd] = useState('18:00');
   const [bufBefore, setBufBefore] = useState(0);
@@ -565,6 +582,15 @@ export default function ProposePage() {
               <div className="sc-row2">
                 <input className="sc-input" type="date" value={periodStart} min={todayIso()} onChange={(e) => setPeriodStart(e.target.value)} />
                 <input className="sc-input" type="date" value={periodEnd} min={periodStart} onChange={(e) => setPeriodEnd(e.target.value)} />
+              </div>
+              <div className="pp-period-presets">
+                <button type="button" onClick={() => setEndOffsetDays(3)}>3日後</button>
+                <button type="button" onClick={() => setEndOffsetDays(5)}>5日後</button>
+                <button type="button" onClick={() => setEndOffsetDays(7)}>1週間後</button>
+                <button type="button" onClick={setEndNextWeekend}>来週末</button>
+                <button type="button" onClick={() => setEndOffsetDays(14)}>2週間後</button>
+                <button type="button" onClick={() => setEndOffsetDays(21)}>3週間後</button>
+                <button type="button" onClick={() => setEndOffsetDays(30)}>1ヶ月後</button>
               </div>
             </div>
 
