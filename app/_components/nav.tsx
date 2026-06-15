@@ -2,9 +2,12 @@
 /**
  * 共通ナビバー（Spir寄せの3画面構成）。
  * 全ページのトップに表示し、現在地タブを下線青で強調する。
+ *
+ * モバイル（≤768px）ではハンバーガーメニュー化し、タップでオーバーレイ展開する。
  */
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useState, useEffect } from 'react';
 
 type Tab = { href: string; label: string; match: (p: string) => boolean };
 
@@ -18,13 +21,32 @@ const TABS: Tab[] = [
 
 export default function Nav() {
   const pathname = usePathname() ?? '/';
+  const [open, setOpen] = useState(false);
+
+  // パス変更時にメニュー自動クローズ
+  useEffect(() => {
+    setOpen(false);
+  }, [pathname]);
+
+  // メニュー開時は body スクロール抑止（モバイルのみ）
+  useEffect(() => {
+    if (open) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [open]);
+
   return (
     <nav className="nav">
       <div className="wrap navin">
         <Link href="/" className="logo" style={{ textDecoration: 'none', color: 'inherit' }}>
           <span className="mark">📅</span>スケジュール調整くん
         </Link>
-        <div className="navtabs">
+        <div className="navtabs navtabs-desktop">
           {TABS.map((t) => {
             const active = t.match(pathname);
             return (
@@ -39,10 +61,41 @@ export default function Nav() {
             );
           })}
         </div>
-        <div className="navright">
+        <div className="navright navright-desktop">
           <span className="sync"><span className="dot-live" />Googleカレンダー同期中</span>
         </div>
+        <button
+          type="button"
+          className="nav-burger"
+          aria-label={open ? 'メニューを閉じる' : 'メニューを開く'}
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+        >
+          {open ? '✕' : '☰'}
+        </button>
       </div>
+      {open && (
+        <div className="nav-overlay" onClick={() => setOpen(false)}>
+          <div className="nav-overlay-inner" onClick={(e) => e.stopPropagation()}>
+            {TABS.map((t) => {
+              const active = t.match(pathname);
+              return (
+                <Link
+                  key={t.href}
+                  href={t.href}
+                  className={`nav-overlay-tab${active ? ' active' : ''}`}
+                  aria-current={active ? 'page' : undefined}
+                >
+                  {t.label}
+                </Link>
+              );
+            })}
+            <div className="nav-overlay-sync">
+              <span className="sync"><span className="dot-live" />Googleカレンダー同期中</span>
+            </div>
+          </div>
+        </div>
+      )}
     </nav>
   );
 }

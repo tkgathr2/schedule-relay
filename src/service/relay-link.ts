@@ -110,3 +110,93 @@ export function generateSlug(): string {
   for (let i = 0; i < 12; i++) out += chars[Math.floor(Math.random() * chars.length)];
   return out;
 }
+
+/**
+ * /relay/[slug] UI の「仮押さえ済み」一覧用 DTO。
+ * DB の RelayLinkHold 行を、UI が描画に必要な最小フィールドだけに整形する。
+ */
+export interface RelayHoldSummary {
+  id: string;
+  stageOrder: number;
+  stageLabel: string;
+  ownerEmail: string;
+  start: string;
+  end: string;
+  status: string;
+  createdAt: string;
+}
+
+export interface RelayHoldRow {
+  id: string;
+  stageOrder: number;
+  stageLabel: string;
+  ownerEmail: string;
+  startAt: Date | string | number;
+  endAt: Date | string | number;
+  status: string;
+  createdAt: Date | string | number;
+}
+
+function toIso(v: Date | string | number): string {
+  if (v instanceof Date) return v.toISOString();
+  if (typeof v === 'number') return new Date(v).toISOString();
+  // 文字列はそのままISOとして返す（Date.parseできる前提）
+  const t = Date.parse(v);
+  if (Number.isNaN(t)) return v;
+  return new Date(t).toISOString();
+}
+
+/**
+ * RelayLinkHold の生行を UI向け DTO に整形する純関数。
+ * stageOrder昇順 → startAt昇順 で並べ替える。
+ */
+export function summarizeHolds(rows: readonly RelayHoldRow[]): RelayHoldSummary[] {
+  return [...rows]
+    .sort((a, b) => {
+      if (a.stageOrder !== b.stageOrder) return a.stageOrder - b.stageOrder;
+      const at = new Date(a.startAt).getTime();
+      const bt = new Date(b.startAt).getTime();
+      return at - bt;
+    })
+    .map((r) => ({
+      id: r.id,
+      stageOrder: r.stageOrder,
+      stageLabel: r.stageLabel,
+      ownerEmail: r.ownerEmail,
+      start: toIso(r.startAt),
+      end: toIso(r.endAt),
+      status: r.status,
+      createdAt: toIso(r.createdAt),
+    }));
+}
+
+/**
+ * stageごとの仮押さえ件数を集計する。`order` 昇順で返す。
+ * stagesMeta から label を補完し、ホールド0件のステージも 0 で返す。
+ */
+export interface RelayHoldCount {
+  stageOrder: number;
+  stageLabel: string;
+  count: number;
+}
+
+export function countHoldsByStage(
+  rows: readonly RelayHoldRow[],
+  stagesMeta: readonly { order: number; label: string }[],
+): RelayHoldCount[] {
+  const map = new Map<number, { label: string; count: number }>();
+  for (const s of stagesMeta) {
+    map.set(s.order, { label: s.label, count: 0 });
+  }
+  for (const r of rows) {
+    const cur = map.get(r.stageOrder);
+    if (cur) {
+      cur.count += 1;
+    } else {
+      map.set(r.stageOrder, { label: r.stageLabel, count: 1 });
+    }
+  }
+  return [...map.entries()]
+    .map(([order, v]) => ({ stageOrder: order, stageLabel: v.label, count: v.count }))
+    .sort((a, b) => a.stageOrder - b.stageOrder);
+}

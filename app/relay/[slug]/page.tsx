@@ -6,6 +6,9 @@
  */
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
+import CopyLinkButton from './_components/CopyLinkButton';
+import QrCodeButton from './_components/QrCodeButton';
+import HoldsList from './_components/HoldsList';
 
 interface CandidateStage {
   order: number;
@@ -58,6 +61,7 @@ export default function RelayDetailPage() {
   const [booking, setBooking] = useState<number | null>(null);
   const [bookedIdx, setBookedIdx] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [holdsRefreshKey, setHoldsRefreshKey] = useState(0);
 
   useEffect(() => {
     if (!slug) return;
@@ -131,6 +135,7 @@ export default function RelayDetailPage() {
         throw new Error(data.error?.message ?? '仮押さえに失敗しました');
       }
       setBookedIdx(idx);
+      setHoldsRefreshKey((k) => k + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : '仮押さえに失敗しました');
     } finally {
@@ -159,10 +164,16 @@ export default function RelayDetailPage() {
   return (
     <main className="wrap" style={{ padding: '24px 16px', maxWidth: 880 }}>
       <h1 style={{ fontSize: 22, marginBottom: 8 }}>🔁 {info.title}</h1>
-      <p style={{ color: '#555', fontSize: 13, marginBottom: 20 }}>
+      <p style={{ color: '#555', fontSize: 13, marginBottom: 12 }}>
         所要時間 {info.durationMinutes}分 ／ バッファ {info.bufferMinutes}分 ／ 最大ギャップ{' '}
         {info.maxGapDays}日
       </p>
+
+      {/* 共有用コントロール */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 20 }}>
+        <CopyLinkButton slug={slug} />
+        <QrCodeButton slug={slug} />
+      </div>
 
       {/* ステップ可視化 */}
       <div
@@ -216,9 +227,29 @@ export default function RelayDetailPage() {
         </div>
       )}
 
-      <h2 style={{ fontSize: 16, marginBottom: 12 }}>
-        候補（{candidates?.length ?? 0}件）
-      </h2>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          marginBottom: 12,
+        }}
+      >
+        <h2 style={{ fontSize: 16, margin: 0 }}>候補</h2>
+        <span
+          style={{
+            background: '#06c',
+            color: '#fff',
+            padding: '2px 10px',
+            borderRadius: 12,
+            fontSize: 12,
+            fontWeight: 700,
+          }}
+          aria-label="候補件数"
+        >
+          {candidates?.length ?? 0} 件
+        </span>
+      </div>
 
       {candidates && candidates.length === 0 && (
         <p style={{ color: '#888' }}>
@@ -288,6 +319,8 @@ export default function RelayDetailPage() {
           );
         })}
       </div>
+
+      <HoldsList slug={slug} refreshKey={holdsRefreshKey} />
     </main>
   );
 }
