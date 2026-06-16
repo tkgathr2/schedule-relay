@@ -1,0 +1,958 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "スケジュール調整くん API",
+    "version": "1.0.0",
+    "description": "Spir全機能＋リレー型T6（A→B→C 順番調整）の API 仕様。\n\n- 一般 API：認証なし（Rate Limit で保護）\n- /api/admin/** ：Basic 認証ゲート（middleware で強制）\n- /api/docs, /api/openapi, /docs ：認証不要（本ドキュメント自身）\n\nレスポンス時刻は ISO8601（UTC）。受信時は ISO8601 または epoch ms を受け付ける。"
+  },
+  "servers": [
+    { "url": "https://schedule.takagi.bz", "description": "本番（予定）" },
+    { "url": "http://localhost:3000", "description": "ローカル開発" }
+  ],
+  "tags": [
+    { "name": "availability", "description": "候補自動抽出（Spir相当）" },
+    { "name": "google", "description": "Googleカレンダー連携" },
+    { "name": "pages", "description": "予約ページ（Spir同等の T1〜T5）" },
+    { "name": "relay", "description": "リレー型 T6（A→B→C 順番調整）" },
+    { "name": "admin", "description": "管理ダッシュボード（Basic認証）" },
+    { "name": "ops", "description": "運用（ヘルスチェック）" }
+  ],
+  "security": [],
+  "paths": {
+    "/api/availability/propose": {
+      "post": {
+        "tags": ["availability"],
+        "summary": "候補を自動抽出（Spirの『候補を自動抽出』相当）",
+        "description": "指定したGoogleカレンダー（複数可）の busy を考慮し、営業時間・前後バッファ・最低リードタイムを反映した空き枠候補を返す。Google未連携時は busy=[] でdegrade-safe（営業時間ベースで候補生成）。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ProposeRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "候補一覧",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ProposeResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/api/google/calendars": {
+      "get": {
+        "tags": ["google"],
+        "summary": "主催者のGoogleカレンダー一覧",
+        "description": "候補自動抽出UIの「予定を考慮するカレンダー」セレクタ用。env未設定/失敗時は { calendars: [] } で degrade-safe。",
+        "responses": {
+          "200": {
+            "description": "カレンダー一覧",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["calendars"],
+                  "properties": {
+                    "calendars": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/GoogleCalendar" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/api/pages": {
+      "get": {
+        "tags": ["pages"],
+        "summary": "予約ページ一覧（主催者別）",
+        "parameters": [
+          {
+            "name": "organizerId",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "includeInactive",
+            "in": "query",
+            "required": false,
+            "description": "1 を指定すると非アクティブも含める",
+            "schema": { "type": "string", "enum": ["1"] }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "予約ページ一覧",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["pages"],
+                  "properties": {
+                    "pages": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/BookingPage" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" }
+        }
+      },
+      "post": {
+        "tags": ["pages"],
+        "summary": "予約ページを作成",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreatePageRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "作成済み",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["page"],
+                  "properties": {
+                    "page": { "$ref": "#/components/schemas/BookingPage" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/api/pages/{slug}/availability": {
+      "get": {
+        "tags": ["pages"],
+        "summary": "予約ページの空き枠を算出",
+        "parameters": [
+          { "$ref": "#/components/parameters/Slug" },
+          {
+            "name": "now",
+            "in": "query",
+            "required": false,
+            "description": "テスト/プレビュー用の現在時刻（ISO8601 または epoch ms）。",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "空き枠",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AvailabilityResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/api/pages/{slug}/cancel": {
+      "post": {
+        "tags": ["pages"],
+        "summary": "予約ページを非アクティブ化",
+        "parameters": [{ "$ref": "#/components/parameters/Slug" }],
+        "responses": {
+          "200": {
+            "description": "非アクティブ化済み",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["page"],
+                  "properties": {
+                    "page": { "$ref": "#/components/schemas/BookingPage" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/api/relay/create": {
+      "post": {
+        "tags": ["relay"],
+        "summary": "リレー型リンク（T6）を作成",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateRelayRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "作成済み",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["slug", "id"],
+                  "properties": {
+                    "slug": { "type": "string" },
+                    "id": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/api/relay/{slug}": {
+      "get": {
+        "tags": ["relay"],
+        "summary": "リレー型リンクの基本情報",
+        "parameters": [{ "$ref": "#/components/parameters/Slug" }],
+        "responses": {
+          "200": {
+            "description": "リンク情報",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RelayLink" }
+              }
+            }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/api/relay/{slug}/candidates": {
+      "post": {
+        "tags": ["relay"],
+        "summary": "順序付き連続候補（A→B→C）を算出",
+        "parameters": [{ "$ref": "#/components/parameters/Slug" }],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "maxCandidates": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 50,
+                    "default": 12
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "候補一覧",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RelayCandidatesResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/api/relay/{slug}/book": {
+      "post": {
+        "tags": ["relay"],
+        "summary": "候補を仮押さえ（A→B→C を一括で）",
+        "parameters": [{ "$ref": "#/components/parameters/Slug" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/BookRelayRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "仮押さえ完了",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/BookRelayResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/api/relay/{slug}/holds": {
+      "get": {
+        "tags": ["relay"],
+        "summary": "このリレーリンクの仮押さえ一覧",
+        "parameters": [{ "$ref": "#/components/parameters/Slug" }],
+        "responses": {
+          "200": {
+            "description": "仮押さえ一覧",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["slug", "holds"],
+                  "properties": {
+                    "slug": { "type": "string" },
+                    "holds": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/RelayHold" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/api/admin/stats": {
+      "get": {
+        "tags": ["admin"],
+        "summary": "管理ダッシュボードのカード集計",
+        "security": [{ "basicAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "集計",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AdminStats" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/admin/links": {
+      "get": {
+        "tags": ["admin"],
+        "summary": "Link（BookingPage）一覧",
+        "security": [{ "basicAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "リンク一覧",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["links"],
+                  "properties": {
+                    "links": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/AdminLinkRow" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/admin/links/{slug}": {
+      "patch": {
+        "tags": ["admin"],
+        "summary": "Link の有効/無効切替",
+        "security": [{ "basicAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/Slug" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AdminStatusPatch" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "更新済み",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["slug", "isActive"],
+                  "properties": {
+                    "slug": { "type": "string" },
+                    "isActive": { "type": "boolean" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/api/admin/relay-links": {
+      "get": {
+        "tags": ["admin"],
+        "summary": "RelayLink 一覧",
+        "security": [{ "basicAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "リレーリンク一覧",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["links"],
+                  "properties": {
+                    "links": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/AdminRelayRow" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/admin/relay-links/{slug}": {
+      "patch": {
+        "tags": ["admin"],
+        "summary": "RelayLink の status 切替（open/closed）",
+        "security": [{ "basicAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/Slug" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AdminStatusPatch" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "更新済み",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["slug", "status", "isActive"],
+                  "properties": {
+                    "slug": { "type": "string" },
+                    "status": { "type": "string", "enum": ["open", "closed"] },
+                    "isActive": { "type": "boolean" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/api/health": {
+      "get": {
+        "tags": ["ops"],
+        "summary": "ヘルスチェック",
+        "description": "DB ping を含む。失敗時も HTTP 200 を維持し外部監視に判定を委ねる。",
+        "responses": {
+          "200": {
+            "description": "ヘルス",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HealthResponse" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "basicAuth": {
+        "type": "http",
+        "scheme": "basic",
+        "description": "ADMIN_USER / ADMIN_PASS。未設定時は 503。"
+      }
+    },
+    "parameters": {
+      "Slug": {
+        "name": "slug",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "string", "pattern": "^[a-zA-Z0-9_-]{1,64}$" }
+      }
+    },
+    "responses": {
+      "ValidationError": {
+        "description": "リクエスト不正",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "対象が見つからない",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "状態競合（仮押さえ衝突／リンクclosed等）",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Rate Limit に到達",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Basic認証が必要",
+        "headers": {
+          "WWW-Authenticate": {
+            "schema": { "type": "string" }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "ErrorResponse": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": { "type": "string" },
+          "code": { "type": "string" }
+        }
+      },
+      "Interval": {
+        "type": "object",
+        "required": ["start", "end"],
+        "properties": {
+          "start": { "type": "string", "format": "date-time" },
+          "end": { "type": "string", "format": "date-time" }
+        }
+      },
+      "WorkingHours": {
+        "type": "object",
+        "description": "営業時間設定。未指定なら平日 09-18 JST。",
+        "properties": {
+          "tz": { "type": "string", "example": "Asia/Tokyo" },
+          "weekly": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "weekday": { "type": "integer", "minimum": 0, "maximum": 6 },
+                "ranges": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["start", "end"],
+                    "properties": {
+                      "start": { "type": "string", "example": "09:00" },
+                      "end": { "type": "string", "example": "18:00" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "ProposeRequest": {
+        "type": "object",
+        "required": ["calendarIds", "periodStart", "periodEnd", "durationMinutes"],
+        "properties": {
+          "calendarIds": { "type": "array", "items": { "type": "string" } },
+          "periodStart": {
+            "oneOf": [
+              { "type": "string", "format": "date-time" },
+              { "type": "integer", "description": "epoch ms" }
+            ]
+          },
+          "periodEnd": {
+            "oneOf": [
+              { "type": "string", "format": "date-time" },
+              { "type": "integer", "description": "epoch ms" }
+            ]
+          },
+          "durationMinutes": { "type": "integer", "minimum": 1, "maximum": 1440 },
+          "gridMinutes": { "type": "integer", "default": 15 },
+          "workingHours": { "$ref": "#/components/schemas/WorkingHours" },
+          "bufferBeforeMin": { "type": "integer", "minimum": 0 },
+          "bufferAfterMin": { "type": "integer", "minimum": 0 },
+          "minNoticeMin": { "type": "integer", "minimum": 0 },
+          "maxSlots": { "type": "integer", "default": 10 }
+        }
+      },
+      "ProposeResponse": {
+        "type": "object",
+        "required": ["slots", "busy", "periodStart", "periodEnd", "calendarIds"],
+        "properties": {
+          "slots": { "type": "array", "items": { "$ref": "#/components/schemas/Interval" } },
+          "busy": { "type": "array", "items": { "$ref": "#/components/schemas/Interval" } },
+          "busyByCalendar": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["start", "end"],
+                "properties": {
+                  "start": { "type": "string", "format": "date-time" },
+                  "end": { "type": "string", "format": "date-time" },
+                  "title": { "type": "string" }
+                }
+              }
+            }
+          },
+          "periodStart": { "type": "string", "format": "date-time" },
+          "periodEnd": { "type": "string", "format": "date-time" },
+          "calendarIds": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "GoogleCalendar": {
+        "type": "object",
+        "required": ["id", "summary"],
+        "properties": {
+          "id": { "type": "string" },
+          "summary": { "type": "string" },
+          "primary": { "type": "boolean" },
+          "accessRole": { "type": "string" },
+          "backgroundColor": { "type": "string" }
+        }
+      },
+      "AdjustmentType": {
+        "type": "string",
+        "enum": ["T1", "T2", "T3", "T4", "T5", "T6"],
+        "description": "T1〜T5: Spir同等。T6: リレー型（A→B→C 順番調整）"
+      },
+      "BookingPage": {
+        "type": "object",
+        "required": ["id", "slug", "organizerId", "type", "isActive"],
+        "properties": {
+          "id": { "type": "string" },
+          "slug": { "type": "string" },
+          "organizerId": { "type": "string" },
+          "type": { "$ref": "#/components/schemas/AdjustmentType" },
+          "isActive": { "type": "boolean" },
+          "settings": { "type": "object", "additionalProperties": true },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "CreatePageRequest": {
+        "type": "object",
+        "required": ["organizerId", "slug", "type"],
+        "properties": {
+          "organizerId": { "type": "string" },
+          "slug": { "type": "string", "pattern": "^[a-zA-Z0-9_-]{1,64}$" },
+          "type": { "$ref": "#/components/schemas/AdjustmentType" },
+          "settings": { "type": "object", "additionalProperties": true }
+        }
+      },
+      "AvailabilityResponse": {
+        "type": "object",
+        "required": ["slug", "now", "meta", "slots"],
+        "properties": {
+          "slug": { "type": "string" },
+          "now": { "type": "string", "format": "date-time" },
+          "meta": {
+            "type": "object",
+            "required": ["title", "description", "durationMin", "tz", "organizerId"],
+            "properties": {
+              "title": { "type": "string" },
+              "description": { "type": "string" },
+              "durationMin": { "type": "integer" },
+              "tz": { "type": "string" },
+              "organizerId": { "type": "string" }
+            }
+          },
+          "slots": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/Interval" }
+          }
+        }
+      },
+      "RelayStage": {
+        "type": "object",
+        "required": ["label", "ownerEmail", "calendarIds"],
+        "properties": {
+          "order": { "type": "integer", "minimum": 1 },
+          "label": { "type": "string" },
+          "ownerEmail": { "type": "string", "format": "email" },
+          "calendarIds": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "CreateRelayRequest": {
+        "type": "object",
+        "required": ["title", "durationMinutes", "stages"],
+        "properties": {
+          "title": { "type": "string" },
+          "durationMinutes": { "type": "integer", "minimum": 5, "maximum": 1440 },
+          "stages": {
+            "type": "array",
+            "minItems": 2,
+            "items": { "$ref": "#/components/schemas/RelayStage" }
+          },
+          "bufferMinutes": { "type": "integer", "minimum": 0, "default": 15 },
+          "maxGapDays": { "type": "integer", "minimum": 1, "default": 14 },
+          "startDate": {
+            "oneOf": [
+              { "type": "string", "format": "date-time" },
+              { "type": "integer" },
+              { "type": "null" }
+            ]
+          },
+          "endDate": {
+            "oneOf": [
+              { "type": "string", "format": "date-time" },
+              { "type": "integer" },
+              { "type": "null" }
+            ]
+          }
+        }
+      },
+      "RelayLink": {
+        "type": "object",
+        "required": ["slug", "title", "durationMinutes", "stages", "status", "createdAt"],
+        "properties": {
+          "slug": { "type": "string" },
+          "title": { "type": "string" },
+          "durationMinutes": { "type": "integer" },
+          "stages": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/RelayStage" }
+          },
+          "bufferMinutes": { "type": "integer" },
+          "maxGapDays": { "type": "integer" },
+          "startDate": { "type": ["string", "null"], "format": "date-time" },
+          "endDate": { "type": ["string", "null"], "format": "date-time" },
+          "status": { "type": "string", "enum": ["open", "closed"] },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "RelayCandidate": {
+        "type": "object",
+        "required": ["stages"],
+        "properties": {
+          "stages": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["order", "label", "start", "end"],
+              "properties": {
+                "order": { "type": "integer" },
+                "label": { "type": "string" },
+                "start": { "type": "string", "format": "date-time" },
+                "end": { "type": "string", "format": "date-time" }
+              }
+            }
+          }
+        }
+      },
+      "RelayCandidatesResponse": {
+        "type": "object",
+        "required": ["candidates", "stages", "durationMinutes", "bufferMinutes", "maxGapDays"],
+        "properties": {
+          "candidates": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/RelayCandidate" }
+          },
+          "stages": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["order", "label", "ownerEmail"],
+              "properties": {
+                "order": { "type": "integer" },
+                "label": { "type": "string" },
+                "ownerEmail": { "type": "string" }
+              }
+            }
+          },
+          "durationMinutes": { "type": "integer" },
+          "bufferMinutes": { "type": "integer" },
+          "maxGapDays": { "type": "integer" }
+        }
+      },
+      "BookRelayRequest": {
+        "type": "object",
+        "required": ["candidate"],
+        "properties": {
+          "candidate": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["stage", "start", "end"],
+              "properties": {
+                "stage": { "type": "integer", "minimum": 1 },
+                "start": {
+                  "oneOf": [
+                    { "type": "string", "format": "date-time" },
+                    { "type": "integer" }
+                  ]
+                },
+                "end": {
+                  "oneOf": [
+                    { "type": "string", "format": "date-time" },
+                    { "type": "integer" }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "BookRelayResponse": {
+        "type": "object",
+        "required": ["ok", "holds"],
+        "properties": {
+          "ok": { "type": "boolean" },
+          "holds": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["stageOrder", "stageLabel", "start", "end"],
+              "properties": {
+                "stageOrder": { "type": "integer" },
+                "stageLabel": { "type": "string" },
+                "start": { "type": "string", "format": "date-time" },
+                "end": { "type": "string", "format": "date-time" },
+                "googleEventId": { "type": ["string", "null"] },
+                "googleEventLink": { "type": ["string", "null"] }
+              }
+            }
+          }
+        }
+      },
+      "RelayHold": {
+        "type": "object",
+        "required": ["stageOrder", "stageLabel", "ownerEmail", "start", "end", "status"],
+        "properties": {
+          "stageOrder": { "type": "integer" },
+          "stageLabel": { "type": "string" },
+          "ownerEmail": { "type": "string" },
+          "start": { "type": "string", "format": "date-time" },
+          "end": { "type": "string", "format": "date-time" },
+          "googleEventId": { "type": ["string", "null"] },
+          "status": { "type": "string", "enum": ["provisional", "confirmed", "released"] }
+        }
+      },
+      "AdminStats": {
+        "type": "object",
+        "required": [
+          "linkPagesTotal",
+          "linkPagesActive",
+          "linkConfirmationsTotal",
+          "relayLinksTotal",
+          "relayLinksOpen",
+          "relayHoldsTotal",
+          "confirmationsLast24h"
+        ],
+        "properties": {
+          "linkPagesTotal": { "type": "integer" },
+          "linkPagesActive": { "type": "integer" },
+          "linkConfirmationsTotal": { "type": "integer" },
+          "relayLinksTotal": { "type": "integer" },
+          "relayLinksOpen": { "type": "integer" },
+          "relayHoldsTotal": { "type": "integer" },
+          "confirmationsLast24h": { "type": "integer" }
+        }
+      },
+      "AdminLinkRow": {
+        "type": "object",
+        "required": ["slug", "type", "isActive", "confirmationsCount", "createdAt"],
+        "properties": {
+          "slug": { "type": "string" },
+          "type": { "$ref": "#/components/schemas/AdjustmentType" },
+          "title": { "type": "string" },
+          "organizerId": { "type": "string" },
+          "isActive": { "type": "boolean" },
+          "confirmationsCount": { "type": "integer" },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "AdminRelayRow": {
+        "type": "object",
+        "required": ["slug", "title", "durationMinutes", "status", "holdsCount", "createdAt"],
+        "properties": {
+          "slug": { "type": "string" },
+          "title": { "type": "string" },
+          "durationMinutes": { "type": "integer" },
+          "stagesCount": { "type": "integer" },
+          "status": { "type": "string", "enum": ["open", "closed"] },
+          "isActive": { "type": "boolean" },
+          "holdsCount": { "type": "integer" },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "AdminStatusPatch": {
+        "type": "object",
+        "required": ["status"],
+        "properties": {
+          "status": { "type": "string", "enum": ["active", "disabled"] }
+        }
+      },
+      "HealthResponse": {
+        "type": "object",
+        "required": ["status", "uptime", "db", "version", "ts"],
+        "properties": {
+          "status": { "type": "string", "enum": ["ok", "degraded"] },
+          "uptime": { "type": "integer", "description": "秒" },
+          "db": { "type": "string", "enum": ["ok", "down", "skipped"] },
+          "version": { "type": "string" },
+          "ts": { "type": "string", "format": "date-time" }
+        }
+      }
+    }
+  }
+}
