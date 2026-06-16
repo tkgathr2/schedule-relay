@@ -8,6 +8,7 @@ import { use, useCallback, useEffect, useMemo, useState } from 'react';
 import '../../scheduler.css';
 import CopyLinkButton from '../../_shared/CopyLinkButton';
 import QrCodeButton from '../../_shared/QrCodeButton';
+import IcalButton from '../../_shared/IcalButton';
 
 const WEEK = ['月', '火', '水', '木', '金', '土', '日'];
 const GRID_START = 8;
@@ -220,6 +221,7 @@ export default function BookingPage({ params }: { params: Promise<{ slug: string
             <div className="sc-share">
               <CopyLinkButton path={`/b/${slug}`} />
               <QrCodeButton path={`/b/${slug}`} />
+              <IcalButton url={`/api/b/${slug}/ical`} filename={`${slug}.ics`} />
             </div>
           )}
         </div>

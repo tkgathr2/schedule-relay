@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import CopyLinkButton from './_components/CopyLinkButton';
 import QrCodeButton from './_components/QrCodeButton';
+import IcalButton from '../../_shared/IcalButton';
 import HoldsList from './_components/HoldsList';
 
 interface CandidateStage {
@@ -173,6 +174,7 @@ export default function RelayDetailPage() {
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 20 }}>
         <CopyLinkButton slug={slug} />
         <QrCodeButton slug={slug} />
+        <IcalButton url={`/api/relay/${slug}/ical`} filename={`${slug}.ics`} />
       </div>
 
       {/* ステップ可視化 */}
