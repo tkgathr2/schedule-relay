@@ -10,6 +10,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { GET as statsGET } from '../stats/route';
+import { GET as timeseriesGET } from '../stats/timeseries/route';
 import { GET as linksGET } from '../links/route';
 import { PATCH as linkPATCH } from '../links/[slug]/route';
 import { GET as relayGET } from '../relay-links/route';
@@ -151,6 +152,55 @@ describe('/api/admin/links', () => {
     });
     const res = await linkPATCH(req, { params: Promise.resolve({ slug: 'bad' }) });
     expect(res.status).toBe(400);
+  });
+});
+
+describe('/api/admin/stats/timeseries', () => {
+  it('200 で TimeseriesResult を返す（days デフォルト 30）', async () => {
+    await seed();
+    const req = new Request('https://x.test/api/admin/stats/timeseries');
+    const res = await timeseriesGET(req);
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      days: number;
+      from: string;
+      to: string;
+      confirmations: { date: string; count: number }[];
+      holds: { date: string; count: number }[];
+    };
+    expect(json.days).toBe(30);
+    expect(json.confirmations).toHaveLength(30);
+    expect(json.holds).toHaveLength(30); // DB 未接続でも 0埋め配列で返る
+    expect(typeof json.from).toBe('string');
+    expect(typeof json.to).toBe('string');
+  });
+
+  it('days=7 を指定すると 7 件の系列が返る', async () => {
+    await seed();
+    const req = new Request('https://x.test/api/admin/stats/timeseries?days=7');
+    const res = await timeseriesGET(req);
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      days: number;
+      confirmations: { date: string; count: number }[];
+    };
+    expect(json.days).toBe(7);
+    expect(json.confirmations).toHaveLength(7);
+  });
+
+  it('不正な days（負・文字列・超大）はクランプ／デフォルトに丸める', async () => {
+    const cases: Array<{ q: string; expected: number }> = [
+      { q: '?days=-5', expected: 1 },
+      { q: '?days=999', expected: 90 },
+      { q: '?days=abc', expected: 30 },
+    ];
+    for (const c of cases) {
+      const req = new Request(`https://x.test/api/admin/stats/timeseries${c.q}`);
+      const res = await timeseriesGET(req);
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as { days: number };
+      expect(json.days).toBe(c.expected);
+    }
   });
 });
 

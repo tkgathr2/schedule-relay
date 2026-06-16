@@ -6,6 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildStats,
+  buildTimeseries,
   checkAdminAuth,
   formatLinkRows,
   formatRelayRows,
@@ -169,5 +170,119 @@ describe('buildStats', () => {
       relay: { total: 2, active: 1, holds: 7 },
       confirmationsLast24h: 3,
     });
+  });
+});
+
+describe('buildTimeseries', () => {
+  // 固定の「今」: 2026-06-15T12:00:00Z（UTC基準で today=2026-06-15）
+  const NOW = Date.UTC(2026, 5, 15, 12, 0, 0);
+  const DAY = 24 * 60 * 60 * 1000;
+
+  it('欠落日は count=0 で埋め、長さ=days・date 昇順を保つ', () => {
+    // 確定が「2026-06-15」「2026-06-13」の2日のみ → 残り日付は0埋め
+    const result = buildTimeseries({
+      confirmations: [
+        { confirmedAt: NOW }, // 06-15
+        { confirmedAt: NOW - 2 * DAY }, // 06-13
+      ],
+      holds: [],
+      days: 7,
+      nowMs: NOW,
+    });
+    expect(result.confirmations).toHaveLength(7);
+    expect(result.holds).toHaveLength(7);
+    // 昇順
+    for (let i = 1; i < result.confirmations.length; i++) {
+      expect(
+        result.confirmations[i]!.date >= result.confirmations[i - 1]!.date,
+      ).toBe(true);
+    }
+    // 末尾は今日
+    expect(result.confirmations.at(-1)!.date).toBe('2026-06-15');
+    // 0埋めされ全合計=2
+    const sum = result.confirmations.reduce((a, p) => a + p.count, 0);
+    expect(sum).toBe(2);
+    // holds は全て0
+    expect(result.holds.every((p) => p.count === 0)).toBe(true);
+    // days/from/to が返る
+    expect(result.days).toBe(7);
+    expect(typeof result.from).toBe('string');
+    expect(typeof result.to).toBe('string');
+  });
+
+  it('期間外（過去すぎ・未来）はフィルタで除外する', () => {
+    const result = buildTimeseries({
+      confirmations: [
+        { confirmedAt: NOW - 100 * DAY }, // 期間外（過去）
+        { confirmedAt: NOW + 5 * DAY }, // 期間外（未来）
+        { confirmedAt: NOW - 3 * DAY }, // 期間内
+      ],
+      holds: [],
+      days: 7,
+      nowMs: NOW,
+    });
+    const sum = result.confirmations.reduce((a, p) => a + p.count, 0);
+    expect(sum).toBe(1);
+  });
+
+  it('空入力でも長さ=days・全 count=0 を返す', () => {
+    const result = buildTimeseries({
+      confirmations: [],
+      holds: [],
+      days: 30,
+      nowMs: NOW,
+    });
+    expect(result.confirmations).toHaveLength(30);
+    expect(result.holds).toHaveLength(30);
+    expect(result.confirmations.every((p) => p.count === 0)).toBe(true);
+    expect(result.holds.every((p) => p.count === 0)).toBe(true);
+  });
+
+  it('days=1 は今日1日分のみ集計する', () => {
+    const result = buildTimeseries({
+      confirmations: [
+        { confirmedAt: NOW }, // 今日
+        { confirmedAt: NOW - 1 * DAY }, // 昨日（期間外）
+      ],
+      holds: [{ createdAt: NOW }],
+      days: 1,
+      nowMs: NOW,
+    });
+    expect(result.confirmations).toHaveLength(1);
+    expect(result.confirmations[0]!.count).toBe(1);
+    expect(result.holds[0]!.count).toBe(1);
+    expect(result.confirmations[0]!.date).toBe('2026-06-15');
+  });
+
+  it('日付ソート：同日複数件はその日の count としてまとまる', () => {
+    const result = buildTimeseries({
+      confirmations: [
+        { confirmedAt: NOW - 1 * DAY + 1000 },
+        { confirmedAt: NOW - 1 * DAY + 2000 },
+        { confirmedAt: NOW - 1 * DAY + 3000 },
+        { confirmedAt: NOW },
+      ],
+      holds: [{ createdAt: NOW }, { createdAt: NOW }],
+      days: 3,
+      nowMs: NOW,
+    });
+    expect(result.confirmations).toHaveLength(3);
+    // 末尾(今日)=1、その1つ前(昨日)=3
+    expect(result.confirmations.at(-1)!.count).toBe(1);
+    expect(result.confirmations.at(-2)!.count).toBe(3);
+    expect(result.holds.at(-1)!.count).toBe(2);
+  });
+
+  it('上限/下限：days=0以下は1にクランプ、Date 入力も受け付ける', () => {
+    const result = buildTimeseries({
+      confirmations: [{ confirmedAt: new Date(NOW) }],
+      holds: [{ createdAt: new Date(NOW) }],
+      days: 0,
+      nowMs: NOW,
+    });
+    expect(result.days).toBe(1);
+    expect(result.confirmations).toHaveLength(1);
+    expect(result.confirmations[0]!.count).toBe(1);
+    expect(result.holds[0]!.count).toBe(1);
   });
 });

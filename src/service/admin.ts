@@ -169,3 +169,92 @@ function toIso(v: number | Date): string {
   if (v instanceof Date) return v.toISOString();
   return new Date(v).toISOString();
 }
+
+// ---------------- 時系列集計（/admin/stats 用） ----------------
+
+/** 日別カウントの1点。date は YYYY-MM-DD（UTC基準）。 */
+export interface TimeseriesPoint {
+  date: string;
+  count: number;
+}
+
+/** /api/admin/stats/timeseries のレスポンス DTO。 */
+export interface TimeseriesResult {
+  days: number;
+  from: string;
+  to: string;
+  confirmations: TimeseriesPoint[];
+  holds: TimeseriesPoint[];
+}
+
+/** buildTimeseries の入力。confirmations / holds は createdAt 相当（ms or Date）を持つ。 */
+export interface TimeseriesInput {
+  confirmations: readonly { confirmedAt: number | Date }[];
+  holds: readonly { createdAt: number | Date }[];
+  days: number;
+  /** テスト用に「今」を差し込める。未指定なら Date.now()。 */
+  nowMs?: number;
+}
+
+/** YYYY-MM-DD（UTC）に整形。 */
+function toDateKey(ms: number): string {
+  const d = new Date(ms);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+const DAY_MS_ADMIN = 24 * 60 * 60 * 1000;
+
+/**
+ * 過去 days 日間の日別カウント時系列を組み立てる純関数。
+ *  - 期間外（古すぎる / 未来）はフィルタで除外。
+ *  - 欠落日は count=0 で埋めるのでグラフが切れない。
+ *  - 並びは date 昇順（古→新）。
+ */
+export function buildTimeseries(input: TimeseriesInput): TimeseriesResult {
+  const days = Math.max(1, Math.floor(input.days));
+  const now = typeof input.nowMs === 'number' ? input.nowMs : Date.now();
+  // 期間の右端は「今日（UTC）の 23:59:59」相当 = 翌日0時の1ms前。
+  // 左端は (days-1) 日前の 0:00。
+  const todayKey = toDateKey(now);
+  const todayStart = Date.UTC(
+    Number(todayKey.slice(0, 4)),
+    Number(todayKey.slice(5, 7)) - 1,
+    Number(todayKey.slice(8, 10)),
+  );
+  const fromMs = todayStart - (days - 1) * DAY_MS_ADMIN;
+  const toMs = todayStart + DAY_MS_ADMIN - 1;
+
+  // 0埋め用の date キー一覧（昇順）。
+  const keys: string[] = [];
+  for (let i = 0; i < days; i++) {
+    keys.push(toDateKey(fromMs + i * DAY_MS_ADMIN));
+  }
+
+  const aggregate = (records: readonly { [k: string]: unknown }[], field: string): TimeseriesPoint[] => {
+    const map = new Map<string, number>();
+    for (const k of keys) map.set(k, 0);
+    for (const r of records) {
+      const v = r[field];
+      const ms = v instanceof Date ? v.getTime() : typeof v === 'number' ? v : NaN;
+      if (!Number.isFinite(ms)) continue;
+      if (ms < fromMs || ms > toMs) continue;
+      const k = toDateKey(ms);
+      if (map.has(k)) map.set(k, (map.get(k) ?? 0) + 1);
+    }
+    return keys.map((date) => ({ date, count: map.get(date) ?? 0 }));
+  };
+
+  return {
+    days,
+    from: new Date(fromMs).toISOString(),
+    to: new Date(toMs).toISOString(),
+    confirmations: aggregate(
+      input.confirmations as readonly { [k: string]: unknown }[],
+      'confirmedAt',
+    ),
+    holds: aggregate(input.holds as readonly { [k: string]: unknown }[], 'createdAt'),
+  };
+}
