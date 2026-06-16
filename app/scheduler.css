@@ -107,7 +107,8 @@
 .sc-pub { max-width: 1100px; margin: 0 auto; padding: 0; }
 .sc-pubhead { background: #fff; border: 1px solid var(--sc-line); border-radius: 14px; padding: 20px 24px; margin: 20px; }
 .sc-pubhead h1 { font-size: 20px; margin: 0 0 6px; }
-.sc-pubhead .meta { color: var(--sc-sub); font-size: 13px; display: flex; gap: 14px; flex-wrap: wrap; }
+.sc-pubhead .meta { color: var(--sc-sub); font-size: 13px; display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+.sc-share { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 .sc-pubgrid { display: grid; grid-template-columns: 1fr 340px; gap: 20px; padding: 0 20px 40px; }
 @media (max-width: 880px){ .sc-split{grid-template-columns:1fr} .sc-pubgrid{grid-template-columns:1fr} .sc-savebar{width:100%} .sc-form{max-height:none} }
 
@@ -316,6 +317,8 @@ html, body { overflow-x: hidden; }
   .sc-propose { grid-template-columns: 1fr !important; padding: 16px; gap: 12px; }
   .sc-pubhead { margin: 12px 16px; padding: 16px; }
   .sc-pubhead h1 { font-size: 18px; }
+  .sc-share { flex-direction: column; align-items: stretch; }
+  .sc-share button { width: 100%; min-height: 44px; }
   .sc-panel { position: static; padding: 16px; }
 
   /* 一覧テーブルは横スクロール許可 */

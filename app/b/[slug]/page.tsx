@@ -6,6 +6,8 @@
  */
 import { use, useCallback, useEffect, useMemo, useState } from 'react';
 import '../../scheduler.css';
+import CopyLinkButton from '../../_shared/CopyLinkButton';
+import QrCodeButton from '../../_shared/QrCodeButton';
 
 const WEEK = ['月', '火', '水', '木', '金', '土', '日'];
 const GRID_START = 8;
@@ -200,7 +202,26 @@ export default function BookingPage({ params }: { params: Promise<{ slug: string
           <div className="meta">
             <span>🕐 所要 {durMin}分</span>
             <span>🌐 Asia/Tokyo</span>
+            <span
+              style={{
+                background: '#06c',
+                color: '#fff',
+                padding: '2px 10px',
+                borderRadius: 12,
+                fontSize: 12,
+                fontWeight: 700,
+              }}
+              aria-label="空き候補件数"
+            >
+              候補 {slots.length} 件
+            </span>
           </div>
+          {!done && (
+            <div className="sc-share">
+              <CopyLinkButton path={`/b/${slug}`} />
+              <QrCodeButton path={`/b/${slug}`} />
+            </div>
+          )}
         </div>
 
         {done ? (
