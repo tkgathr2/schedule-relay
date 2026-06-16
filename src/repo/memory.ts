@@ -241,6 +241,29 @@ export class MemoryRepository implements Repository {
     return page;
   }
 
+  async setPageActiveBySlug(slug: string, isActive: boolean): Promise<BookingPageRec | null> {
+    const id = this.pagesBySlug.get(slug);
+    if (!id) return null;
+    const page = this.pages.get(id);
+    if (!page) return null;
+    page.isActive = isActive;
+    return page;
+  }
+
+  async listAllPages(): Promise<BookingPageRec[]> {
+    return [...this.pages.values()].sort((a, b) => b.createdAt - a.createdAt);
+  }
+
+  async countConfirmationsByPage(): Promise<Map<string, number>> {
+    const result = new Map<string, number>();
+    for (const c of this.confirmations.values()) {
+      const ev = this.events.get(c.eventId);
+      if (!ev) continue;
+      result.set(ev.pageId, (result.get(ev.pageId) ?? 0) + 1);
+    }
+    return result;
+  }
+
   async listBlockingIntervals(resourceId: string, now: number): Promise<{ start: number; end: number }[]> {
     const out: { start: number; end: number }[] = [];
     for (const h of this.holds.values()) {

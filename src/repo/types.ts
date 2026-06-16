@@ -163,6 +163,12 @@ export interface Repository {
   }): Promise<ConfirmationRec[]>;
   /** ページを非アクティブにする（slug 指定）。存在しなければ null。 */
   deactivatePageBySlug(slug: string): Promise<BookingPageRec | null>;
+  /** ページの isActive を任意の値に更新する（admin用・active/disabled トグル）。存在しなければ null。 */
+  setPageActiveBySlug(slug: string, isActive: boolean): Promise<BookingPageRec | null>;
+  /** 全主催者のページを返す（admin一覧用・createdAt 降順）。 */
+  listAllPages(): Promise<BookingPageRec[]>;
+  /** ページ単位の確定件数を返す（admin一覧用・pageId→件数）。 */
+  countConfirmationsByPage(): Promise<Map<string, number>>;
 
   /**
    * 指定リソース（主催者枠）で「いま枠を塞いでいる」区間を返す。

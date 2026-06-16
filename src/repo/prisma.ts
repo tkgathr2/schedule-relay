@@ -401,6 +401,36 @@ export class PrismaRepository implements Repository {
     return toPageRec(updated);
   }
 
+  async setPageActiveBySlug(slug: string, isActive: boolean): Promise<BookingPageRec | null> {
+    const existing = await this.db.bookingPage.findUnique({ where: { slug } });
+    if (!existing) return null;
+    const updated = await this.db.bookingPage.update({
+      where: { slug },
+      data: { isActive },
+    });
+    return toPageRec(updated);
+  }
+
+  async listAllPages(): Promise<BookingPageRec[]> {
+    const rows = await this.db.bookingPage.findMany({
+      orderBy: { createdAt: 'desc' },
+    });
+    return rows.map(toPageRec);
+  }
+
+  async countConfirmationsByPage(): Promise<Map<string, number>> {
+    const rows = await this.db.confirmation.findMany({
+      include: { event: { select: { pageId: true } } },
+    });
+    const result = new Map<string, number>();
+    for (const c of rows) {
+      const pageId = c.event?.pageId;
+      if (!pageId) continue;
+      result.set(pageId, (result.get(pageId) ?? 0) + 1);
+    }
+    return result;
+  }
+
   async listBlockingIntervals(resourceId: string, now: number): Promise<Interval[]> {
     // 確定済み（confirmed の Hold）＋ 未失効 active → busy として返す
     const rows = await this.db.hold.findMany({
