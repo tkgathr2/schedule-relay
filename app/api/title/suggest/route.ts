@@ -6,6 +6,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
+// Client is initialized inside POST only when ANTHROPIC_API_KEY is available
 import { PrismaClient } from '@prisma/client';
 
 let _prisma: PrismaClient | null = null;
@@ -17,11 +18,29 @@ function getClient() {
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const PRESET_TITLES = [
+  '打ち合わせのご案内',
+  '面談のご案内',
+  'ご挨拶・情報交換',
+  'オンライン商談',
+  '採用面接のご案内',
+  'ご提案・デモのご案内',
+  'プロジェクト定例MTG',
+  'キックオフミーティング',
+  'フォローアップ面談',
+  '業務委託打ち合わせ',
+];
 
 export async function POST(req: NextRequest) {
   try {
     const { context = '', count = 5 } = (await req.json()) as { context?: string; count?: number };
+
+    if (!process.env.ANTHROPIC_API_KEY) {
+      const titles = PRESET_TITLES.slice(0, count);
+      return NextResponse.json({ titles });
+    }
+
+    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
     // 直近50件の使用済みタイトルを学習データとして渡す
     let history: string[] = [];
