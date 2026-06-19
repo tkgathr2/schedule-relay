@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 import { useState } from 'react';
 import MyPages from './my-pages';
 
@@ -138,7 +138,7 @@ export default function Home() {
         </div>
       </section>
 
-      <footer><div className="wrap">スケジュール調整くん（プレビュー版）／ schedule.takagi.bz ｜ 高木産業グループ・CTO Agent Lab</div></footer>
+      <footer><div className="wrap">スケ調くん（プレビュー版）／ schedule.takagi.bz ｜ 高木産業グループ・CTO Agent Lab</div></footer>
     </>
   );
 }

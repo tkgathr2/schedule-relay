@@ -1,4 +1,4 @@
-/**
+﻿/**
  * GET /api/docs — Swagger UI を返す（依存追加なしで CDN ロード）。
  * 軽量のため `<script>` を unpkg から読み込む。
  *
@@ -15,7 +15,7 @@ const HTML = `<!doctype html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>スケジュール調整くん API ドキュメント</title>
+  <title>スケ調くん API ドキュメント</title>
   <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
   <style>
     body { margin: 0; background: #fafafa; }

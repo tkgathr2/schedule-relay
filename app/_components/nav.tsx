@@ -44,7 +44,7 @@ export default function Nav() {
     <nav className="nav">
       <div className="wrap navin">
         <Link href="/" className="logo" style={{ textDecoration: 'none', color: 'inherit' }}>
-          <span className="mark">📅</span>スケジュール調整くん
+          <span className="mark">📅</span>スケ調くん
         </Link>
         <div className="navtabs navtabs-desktop">
           {TABS.map((t) => {

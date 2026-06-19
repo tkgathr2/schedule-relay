@@ -1,4 +1,4 @@
-import type { MetadataRoute } from 'next';
+﻿import type { MetadataRoute } from 'next';
 
 /**
  * Next.js 15 metadata API による PWA Web App Manifest。
@@ -9,7 +9,7 @@ import type { MetadataRoute } from 'next';
  */
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'スケジュール調整くん',
+    name: 'スケ調くん',
     short_name: '調整くん',
     description:
       'Google/Microsoftカレンダー連携の日程調整ツール。空き時間リンク・リレー型調整に対応。',

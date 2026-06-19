@@ -1,4 +1,4 @@
-/**
+﻿/**
  * /admin レイアウト。シンプルなナビと内側コンテナだけ。
  * 認証は middleware で済ませる前提。
  */
@@ -20,7 +20,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
           gap: 24,
         }}
       >
-        <strong style={{ fontSize: 18 }}>スケジュール調整くん 管理</strong>
+        <strong style={{ fontSize: 18 }}>スケ調くん 管理</strong>
         <nav style={{ display: 'flex', gap: 16, fontSize: 14 }}>
           <Link href="/admin" style={{ color: '#fff', textDecoration: 'none' }}>
             ダッシュボード

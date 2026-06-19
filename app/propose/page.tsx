@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 /**
  * /propose — Spirの「候補を自動抽出」相当の3カラムUI。
  * 左：設定（タイトル・調整タイプT2/T3・打合せ時間・期間・営業時間・バッファ）
@@ -282,7 +282,8 @@ export default function ProposePage() {
           /* 壊れた値は無視 */
         }
         if (!restored) {
-          for (const c of cals) if (c.primary) init.add(c.id);
+          // 初回は全カレンダーを選択（香奈カレンダー等も自動で含める）
+          for (const c of cals) init.add(c.id);
           if (init.size === 0 && cals.length > 0) init.add(cals[0]!.id);
         }
         setSelectedCals(init);
@@ -741,7 +742,7 @@ export default function ProposePage() {
   return (
     <div className="sc-wrap">
       <div className="sc-topbar">
-        <div className="sc-logo"><span className="mk">📅</span>スケジュール調整くん</div>
+        <div className="sc-logo"><span className="mk">📅</span>スケ調くん</div>
         <div className="sc-spacer" />
         <span className="sc-pill">候補を自動抽出</span>
       </div>

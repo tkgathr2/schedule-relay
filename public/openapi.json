@@ -1,7 +1,7 @@
-{
+﻿{
   "openapi": "3.1.0",
   "info": {
-    "title": "スケジュール調整くん API",
+    "title": "スケ調くん API",
     "version": "1.0.0",
     "description": "Spir全機能＋リレー型T6（A→B→C 順番調整）の API 仕様。\n\n- 一般 API：認証なし（Rate Limit で保護）\n- /api/admin/** ：Basic 認証ゲート（middleware で強制）\n- /api/docs, /api/openapi, /docs ：認証不要（本ドキュメント自身）\n\nレスポンス時刻は ISO8601（UTC）。受信時は ISO8601 または epoch ms を受け付ける。"
   },

@@ -1,8 +1,8 @@
-{
+﻿{
   "name": "schedule-relay",
   "version": "0.1.0",
   "private": true,
-  "description": "スケジュール調整くん（Spir全機能＋リレー型T6）",
+  "description": "スケ調くん（Spir全機能＋リレー型T6）",
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && next build",

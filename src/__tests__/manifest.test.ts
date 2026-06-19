@@ -1,4 +1,4 @@
-/**
+﻿/**
  * PWA Web App Manifest（app/manifest.ts）の出力検証。
  * Next.js 15 の MetadataRoute.Manifest 型に準拠した JSON が返ることを確認する。
  */
@@ -12,7 +12,7 @@ import manifest from '../../app/manifest.js';
 describe('PWA manifest', () => {
   it('基本フィールド（name/short_name/start_url/display）が揃っている', () => {
     const m = manifest();
-    expect(m.name).toBe('スケジュール調整くん');
+    expect(m.name).toBe('スケ調くん');
     expect(m.short_name).toBe('調整くん');
     expect(m.start_url).toBe('/');
     expect(m.display).toBe('standalone');
