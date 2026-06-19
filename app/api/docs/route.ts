@@ -1,4 +1,4 @@
-﻿/**
+/**
  * GET /api/docs — Swagger UI を返す（依存追加なしで CDN ロード）。
  * 軽量のため `<script>` を unpkg から読み込む。
  *

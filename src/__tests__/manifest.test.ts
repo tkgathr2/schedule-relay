@@ -1,4 +1,4 @@
-﻿/**
+/**
  * PWA Web App Manifest（app/manifest.ts）の出力検証。
  * Next.js 15 の MetadataRoute.Manifest 型に準拠した JSON が返ることを確認する。
  */
