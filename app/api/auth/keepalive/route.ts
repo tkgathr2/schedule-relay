@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { googleConfigFromEnv, googleFreeBusy } from '../../../../service/calendar/google.js';
+import { googleConfigFromEnv, googleFreeBusy } from '../../../../src/service/calendar/google.js';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
