@@ -1,4 +1,4 @@
-﻿import type { Metadata, Viewport } from 'next';
+import type { Metadata, Viewport } from 'next';
 import Nav from './_components/nav';
 import './globals.css';
 import './scheduler.css';

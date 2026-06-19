@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 /**
  * 空き時間リンク 作成画面（Spir の availability-sharing/create を研究して再現）。
  * 左＝設定フォーム／右＝週カレンダーで受付時間帯をプレビュー。保存で公開リンク発行。

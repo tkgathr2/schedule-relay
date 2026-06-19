@@ -1,4 +1,4 @@
-﻿import type { MetadataRoute } from 'next';
+import type { MetadataRoute } from 'next';
 
 /**
  * Next.js 15 metadata API による PWA Web App Manifest。
