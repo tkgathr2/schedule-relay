@@ -197,6 +197,16 @@ model RelayLinkHold {
   @@index([relayLinkId])
 }
 
+/// AIタイトル生成の学習用履歴。使われたタイトルを蓄積して次回の候補精度を上げる。
+model TitleHistory {
+  id        String   @id @default(cuid())
+  title     String
+  context   String?  // ヒント（"Eight","名刺","LinkedIn"など）
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
 model AuditLog {
   id      String   @id @default(cuid())
   eventId String?

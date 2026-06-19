@@ -134,6 +134,27 @@ function hexToRgba(hex: string | undefined, alpha: number): string {
 export default function ProposePage() {
   // 設定
   const [title, setTitle] = useState('');
+  const [aiContext, setAiContext] = useState('');
+  const [aiSuggestions, setAiSuggestions] = useState<string[]>([]);
+  const [aiLoading, setAiLoading] = useState(false);
+
+  const generateTitles = useCallback(async () => {
+    setAiLoading(true);
+    setAiSuggestions([]);
+    try {
+      const res = await fetch('/api/title/suggest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ context: aiContext, count: 5 }),
+      });
+      const data = (await res.json()) as { titles: string[] };
+      setAiSuggestions(data.titles ?? []);
+    } catch {
+      /* noop */
+    } finally {
+      setAiLoading(false);
+    }
+  }, [aiContext]);
   const [adjType, setAdjType] = useState<'T2' | 'T3'>('T2');
   const [duration, setDuration] = useState(30);
   const [periodStart, setPeriodStart] = useState(plusDaysIso(1));
@@ -194,6 +215,8 @@ export default function ProposePage() {
   }, [rawSlots, cutoffMode]);
   const [busyByCalendar, setBusyByCalendar] = useState<BusyByCalendar>({});
   const [selectedSlots, setSelectedSlots] = useState<Set<number>>(new Set());
+  const selectedSlotsRef = useRef<Set<number>>(new Set());
+  useEffect(() => { selectedSlotsRef.current = selectedSlots; }, [selectedSlots]);
   // ドラッグ移動／下端リサイズで変更された候補の上書き値（インデックス→新start/end ISO）
   // 既存slotsを直接変えず、表示・送信時にこのMapで上書き反映する。
   const [slotOverrides, setSlotOverrides] = useState<Record<number, { start: string; end: string }>>({});
@@ -400,7 +423,7 @@ export default function ProposePage() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ organizerId: 'takagi', type: adjType, slug, settings }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error?.message || '作成に失敗しました');
       const origin = window.location.origin;
       const url = `${origin}/b/${slug}`;
@@ -472,6 +495,31 @@ export default function ProposePage() {
       const next = new Set(prev);
       if (next.has(i)) next.delete(i);
       else next.add(i);
+      return next;
+    });
+  }
+
+  // アクティブな候補スロットをクリックで完全削除（rawSlotsから除去して空の状態に戻す）
+  function deleteSlot(i: number) {
+    const slotToDelete = slots[i];
+    if (!slotToDelete) return;
+    const startKey = slotToDelete.start;
+    setRawSlots((prev) => prev.filter((s) => s.start !== startKey));
+    setSelectedSlots((prev) => {
+      const next = new Set<number>();
+      for (const idx of prev) {
+        if (idx === i) continue;
+        next.add(idx > i ? idx - 1 : idx);
+      }
+      return next;
+    });
+    setSlotOverrides((prev) => {
+      const next: Record<number, SlotDto> = {};
+      for (const [k, v] of Object.entries(prev)) {
+        const idx = Number(k);
+        if (idx < i) next[idx] = v;
+        else if (idx > i) next[idx - 1] = v;
+      }
       return next;
     });
   }
@@ -708,17 +756,41 @@ export default function ProposePage() {
         }
         // クリック扱い（3px未満）なら、グループ内 全 slot を一括選択／解除
         if (!cur.moved && cur.mode === 'move') {
-          setSelectedSlots((prev) => {
-            const ns = new Set(prev);
-            // 全部選択済みなら一括解除、そうでなければ全部選択
-            const allOn = cur.idxs.every((i) => ns.has(i));
-            if (allOn) {
-              for (const i of cur.idxs) ns.delete(i);
-            } else {
-              for (const i of cur.idxs) ns.add(i);
+          const allOn = cur.idxs.every((i) => selectedSlotsRef.current.has(i));
+          if (allOn) {
+            // アクティブ状態でクリック → rawSlotsから完全削除（空の状態に戻す）
+            // 大きいインデックスから削除してインデックスのズレを防ぐ
+            const sortedDesc = [...cur.idxs].sort((a, b) => b - a);
+            for (const i of sortedDesc) {
+              const slotToDelete = slots[i];
+              if (!slotToDelete) continue;
+              const startKey = slotToDelete.start;
+              setRawSlots((prev) => prev.filter((s) => s.start !== startKey));
+              setSelectedSlots((prev) => {
+                const ns = new Set<number>();
+                for (const idx of prev) {
+                  if (idx === i) continue;
+                  ns.add(idx > i ? idx - 1 : idx);
+                }
+                return ns;
+              });
+              setSlotOverrides((prev) => {
+                const next: Record<number, SlotDto> = {};
+                for (const [k, v] of Object.entries(prev)) {
+                  const idx = Number(k);
+                  if (idx < i) next[idx] = v;
+                  else if (idx > i) next[idx - 1] = v;
+                }
+                return next;
+              });
             }
-            return ns;
-          });
+          } else {
+            setSelectedSlots((prev) => {
+              const ns = new Set(prev);
+              for (const i of cur.idxs) ns.add(i);
+              return ns;
+            });
+          }
         }
         dragRef.current = null;
         setDraggingGroupKey(null);
@@ -803,6 +875,38 @@ export default function ProposePage() {
             <div className="sc-field">
               <label>タイトル<span className="opt">（任意）</span></label>
               <input className="sc-input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="未入力なら「日程候補」になります" />
+              <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                <input
+                  className="sc-input"
+                  style={{ flex: 1, fontSize: 12 }}
+                  value={aiContext}
+                  onChange={(e) => setAiContext(e.target.value)}
+                  placeholder="ヒント例：Eight・名刺・採用・〇〇さん"
+                  onKeyDown={(e) => e.key === 'Enter' && generateTitles()}
+                />
+                <button
+                  className="sc-btn-sm"
+                  onClick={generateTitles}
+                  disabled={aiLoading}
+                  style={{ whiteSpace: 'nowrap', fontSize: 12 }}
+                >
+                  {aiLoading ? '生成中…' : '✨ AI生成'}
+                </button>
+              </div>
+              {aiSuggestions.length > 0 && (
+                <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                  {aiSuggestions.map((s, i) => (
+                    <button
+                      key={i}
+                      className="sc-btn-sm"
+                      style={{ textAlign: 'left', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 8px', fontSize: 12 }}
+                      onClick={() => { setTitle(s); setAiSuggestions([]); }}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="sc-field">
@@ -1037,7 +1141,7 @@ export default function ProposePage() {
                               className={`pp-cal-cand ${on ? 'on' : ''}${isDragging ? ' dragging' : ''}${invalid ? ' invalid' : ''}`}
                               style={{ top, height }}
                               onPointerDown={(e) => startPointerDrag(e, g.idxs, g.tailIdx, 'move', d.ymd, g.start, g.end)}
-                              title={`${startStr}-${endStr}（ドラッグで移動・下端で延長）`}
+                              title={on ? `${startStr}-${endStr}（クリックで削除・ドラッグで移動）` : `${startStr}-${endStr}（クリックで選択・ドラッグで移動）`}
                             >
                               <div className="pp-cal-cand-time">{startStr}-{endStr}</div>
                               <div className="pp-cal-cand-label">{countLabel}</div>
