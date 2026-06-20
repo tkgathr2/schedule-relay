@@ -361,8 +361,9 @@ export default function ProposePage() {
     setBusyByCalendar({});
     setSelectedSlots(new Set());
     try {
-      // カレンダービューの表示週も含めてbusyを取得（過去週の予定もカレンダーに表示するため）
-    const busyFrom = msToJstYmd(Math.min(viewWeekStart, jstDateMs(periodStart)));
+      // 今日の週の月曜日からbusyを取得（期間前の今週の予定もカレンダーに表示するため）
+      const todayWeekMs = startOfWeekJst(Date.now());
+      const busyFrom = msToJstYmd(Math.min(todayWeekMs, jstDateMs(periodStart)));
     const body = {
         calendarIds: Array.from(selectedCals),
         periodStart: new Date(`${busyFrom}T00:00:00+09:00`).toISOString(),
