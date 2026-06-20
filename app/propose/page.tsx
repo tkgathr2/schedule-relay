@@ -392,8 +392,9 @@ export default function ProposePage() {
       setBusyByCalendar((data.busyByCalendar ?? {}) as BusyByCalendar);
       // 既定で全件選択
       setSelectedSlots(new Set(got.map((_, i) => i)));
-      // ビューを期間開始週に合わせる
-      setViewWeekStart(startOfWeekJst(jstDateMs(periodStart)));
+      // 現在表示中の週が期間開始週より前の場合のみビューを合わせる（それ以外はuseEffectの再発火を防ぐ）
+      const targetWeekMs = startOfWeekJst(jstDateMs(periodStart));
+      setViewWeekStart((prev) => (prev < targetWeekMs ? targetWeekMs : prev));
     } catch (e) {
       setExtractErr(e instanceof Error ? e.message : '抽出に失敗しました');
     } finally {
