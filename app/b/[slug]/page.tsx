@@ -284,7 +284,7 @@ export default function BookingPage({ params }: { params: Promise<{ slug: string
               </div>
               {!weekHasSlots && <div className="sc-empty">この週に空き枠はありません。「›」で次の週へ。</div>}
               <div className="sc-legend">
-                <span><i style={{ background: 'var(--sc-open)', border: '1px solid var(--sc-open-bd)' }} />予約可能</span>
+                <span><i style={{ background: '#10b981' }} />予約可能</span>
                 <span><i style={{ background: 'var(--sc-sel)' }} />選択中</span>
               </div>
             </div>
