@@ -345,7 +345,7 @@ export default function ProposePage() {
     return () => clearTimeout(t);
     // 設定変更で自動再抽出する依存。selectedCals は Set なのでサイズと内容で監視
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadingCals, periodStart, periodEnd, duration, whStart, whEnd, bufBefore, bufAfter, minNotice, maxSlots, selectedCals, cutoffMode]);
+  }, [loadingCals, periodStart, periodEnd, duration, whStart, whEnd, bufBefore, bufAfter, minNotice, maxSlots, selectedCals, cutoffMode, viewWeekStart]);
 
   // カレンダーID → 色 マップ
   const calColorMap = useMemo(() => {
@@ -361,9 +361,11 @@ export default function ProposePage() {
     setBusyByCalendar({});
     setSelectedSlots(new Set());
     try {
-      const body = {
+      // カレンダービューの表示週も含めてbusyを取得（過去週の予定もカレンダーに表示するため）
+    const busyFrom = msToJstYmd(Math.min(viewWeekStart, jstDateMs(periodStart)));
+    const body = {
         calendarIds: Array.from(selectedCals),
-        periodStart: new Date(`${periodStart}T00:00:00+09:00`).toISOString(),
+        periodStart: new Date(`${busyFrom}T00:00:00+09:00`).toISOString(),
         periodEnd: new Date(`${periodEnd}T23:59:59+09:00`).toISOString(),
         durationMinutes: duration,
         workingHours: {
