@@ -345,7 +345,7 @@ export default function ProposePage() {
     return () => clearTimeout(t);
     // 設定変更で自動再抽出する依存。selectedCals は Set なのでサイズと内容で監視
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadingCals, periodStart, periodEnd, duration, whStart, whEnd, bufBefore, bufAfter, minNotice, maxSlots, selectedCals, cutoffMode, viewWeekStart]);
+  }, [loadingCals, periodStart, periodEnd, duration, whStart, whEnd, bufBefore, bufAfter, minNotice, maxSlots, selectedCals, cutoffMode]);
 
   // カレンダーID → 色 マップ
   const calColorMap = useMemo(() => {
@@ -392,9 +392,6 @@ export default function ProposePage() {
       setBusyByCalendar((data.busyByCalendar ?? {}) as BusyByCalendar);
       // 既定で全件選択
       setSelectedSlots(new Set(got.map((_, i) => i)));
-      // 現在表示中の週が期間開始週より前の場合のみビューを合わせる（それ以外はuseEffectの再発火を防ぐ）
-      const targetWeekMs = startOfWeekJst(jstDateMs(periodStart));
-      setViewWeekStart((prev) => (prev < targetWeekMs ? targetWeekMs : prev));
     } catch (e) {
       setExtractErr(e instanceof Error ? e.message : '抽出に失敗しました');
     } finally {
