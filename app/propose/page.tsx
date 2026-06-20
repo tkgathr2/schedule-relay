@@ -57,7 +57,7 @@ function plusDaysIso(days: number): string {
 function randSlug(): string {
   let s = '';
   const chars = 'abcdefghijkmnpqrstuvwxyz23456789';
-  for (let i = 0; i < 7; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  for (let i = 0; i < 8; i++) s += chars[Math.floor(Math.random() * chars.length)];
   return s;
 }
 
@@ -156,7 +156,7 @@ export default function ProposePage() {
     }
   }, [aiContext]);
   const [adjType, setAdjType] = useState<'T2' | 'T3'>('T2');
-  const [duration, setDuration] = useState(30);
+  const [duration, setDuration] = useState(60);
   const [periodStart, setPeriodStart] = useState(plusDaysIso(1));
   const [periodEnd, setPeriodEnd] = useState(plusDaysIso(30));
   // 終了日プリセット：開始日から N 日後 ／ 来週末（次の日曜まで＋7日）
