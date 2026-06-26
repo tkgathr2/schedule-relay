@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import Script from "next/script";
 import Nav from './_components/nav';
 import './globals.css';
 import './scheduler.css';
@@ -35,6 +36,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <Nav />
         {children}
+        <Script src="https://kaizen.takagi.bz/widget.js" strategy="lazyOnload" data-sys="schedule-relay" />
       </body>
     </html>
   );
