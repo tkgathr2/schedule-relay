@@ -14,7 +14,7 @@ Spir（spirinc.com）の全調整機能と同等以上を満たしつつ、Spir�
 |---|---|
 | アプリ | Next.js 15 (App Router) + TypeScript |
 | DB | PostgreSQL + Prisma（Railway） |
-| 認証 | Auth.js（Google / Microsoft・セッション180日） |
+| 認証 | ⚠️ **Auth.js は未実装**。現状は `middleware.ts` の Basic 認証（`ADMIN_USER`/`ADMIN_PASS`）が公開導線を除く全ページ・全APIを保護する暫定措置。Auth.js（Google / Microsoft・セッション180日）は次フェーズ |
 | カレンダー | googleapis（freebusy）/ microsoft-graph（getSchedule） |
 | テスト | vitest |
 
