@@ -121,7 +121,10 @@ export async function listGoogleCalendars(
     const oauth2 = new google.auth.OAuth2(cfg.clientId, cfg.clientSecret);
     oauth2.setCredentials({ refresh_token: cfg.refreshToken });
     const cal = google.calendar({ version: 'v3', auth: oauth2 });
-    const list = await cal.calendarList.list({ maxResults: 250, minAccessRole: 'reader' });
+    // showHidden: true — Googleカレンダー側で「表示しない」設定にしたカレンダー
+    // （「他のカレンダー」欄でチェックを外しているもの等）も一覧に含める。
+    // 省略時は false になり、そうしたカレンダーが選択肢から消えて選べなくなる。
+    const list = await cal.calendarList.list({ maxResults: 250, minAccessRole: 'reader', showHidden: true });
     const items = list.data.items ?? [];
     return items
       .filter((c): c is { id: string; summary?: string | null; backgroundColor?: string | null; primary?: boolean | null; accessRole?: string | null } => !!c.id)
