@@ -8,6 +8,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState, useEffect } from 'react';
+import { signOutAction } from '../_actions/sign-out';
 
 type Tab = { href: string; label: string; match: (p: string) => boolean };
 
@@ -63,6 +64,9 @@ export default function Nav() {
         </div>
         <div className="navright navright-desktop">
           <span className="sync"><span className="dot-live" />Googleカレンダー同期中</span>
+          <form action={signOutAction}>
+            <button type="submit" className="signout-btn">ログアウト</button>
+          </form>
         </div>
         <button
           type="button"
@@ -92,6 +96,9 @@ export default function Nav() {
             })}
             <div className="nav-overlay-sync">
               <span className="sync"><span className="dot-live" />Googleカレンダー同期中</span>
+              <form action={signOutAction}>
+                <button type="submit" className="signout-btn signout-btn-overlay">ログアウト</button>
+              </form>
             </div>
           </div>
         </div>
