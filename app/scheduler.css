@@ -124,7 +124,7 @@
 .sc-err { color: #dc2626; font-size: 12.5px; margin-top: 8px; }
 
 /* ---- /propose ：候補を自動抽出（Spir風3カラム） ---- */
-.sc-propose { display: grid; grid-template-columns: 320px 280px minmax(0, 1fr); gap: 14px; padding: 20px; max-width: 1480px; margin: 0 auto; transition: grid-template-columns .2s ease; }
+.sc-propose { display: grid; grid-template-columns: 320px 280px minmax(0, 1fr); gap: 14px; padding: 20px; transition: grid-template-columns .2s ease; }
 .sc-propose.left-collapsed { grid-template-columns: 40px 280px minmax(0, 1fr); }
 .sc-propose.mid-collapsed { grid-template-columns: 320px 40px minmax(0, 1fr); }
 .sc-propose.left-collapsed.mid-collapsed { grid-template-columns: 40px 40px minmax(0, 1fr); }

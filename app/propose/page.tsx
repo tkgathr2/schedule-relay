@@ -385,8 +385,12 @@ export default function ProposePage() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
       });
+      if (!res.ok) {
+        // レスポンスがJSONでない場合（504等、アプリコード外で切られたケース）もステータスは分かるようにする。
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error?.message || `抽出に失敗しました（HTTP ${res.status}）`);
+      }
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error?.message || '抽出に失敗しました');
       const got: SlotDto[] = data.slots ?? [];
       setRawSlots(got);
       setBusyByCalendar((data.busyByCalendar ?? {}) as BusyByCalendar);
