@@ -124,7 +124,12 @@ export async function listGoogleCalendars(
     // showHidden: true — Googleカレンダー側で「表示しない」設定にしたカレンダー
     // （「他のカレンダー」欄でチェックを外しているもの等）も一覧に含める。
     // 省略時は false になり、そうしたカレンダーが選択肢から消えて選べなくなる。
-    const list = await cal.calendarList.list({ maxResults: 250, minAccessRole: 'reader', showHidden: true });
+    //
+    // minAccessRole は指定しない：'reader' を指定すると、他人から
+    // 「空き時間の情報のみ」で共有されたカレンダー（accessRole=freeBusyReader）が
+    // 一覧から消える。空き時間を知りたいだけのこのアプリでは freeBusyReader でも
+    // 十分機能するため、フィルタせず全アクセスレベルを一覧に含める。
+    const list = await cal.calendarList.list({ maxResults: 250, showHidden: true });
     const items = list.data.items ?? [];
     return items
       .filter((c): c is { id: string; summary?: string | null; backgroundColor?: string | null; primary?: boolean | null; accessRole?: string | null } => !!c.id)
