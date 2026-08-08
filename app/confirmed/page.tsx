@@ -1,10 +1,11 @@
 'use client';
 /**
  * /confirmed — 確定済の予定一覧（Spir同等）。
- * GET /api/confirmations?organizerId=takagi&from=YYYY-MM-DD をデータ源にテーブル表示。
- * CSV ダウンロードは GET /api/confirmations/csv?organizerId=takagi。
+ * GET /api/confirmations?organizerId=<ログイン中のuser.id>&from=YYYY-MM-DD をデータ源にテーブル表示。
+ * CSV ダウンロードは GET /api/confirmations/csv?organizerId=<同>。
  */
 import { useCallback, useEffect, useState } from 'react';
+import { useOrganizerId } from '../_components/use-organizer-id';
 
 type ConfRow = {
   id: string;
@@ -17,7 +18,6 @@ type ConfRow = {
   page: { id: string; organizerId: string; settings: { title?: string } | null } | null;
 };
 
-const ORGANIZER_ID = 'takagi';
 const DOW = ['日', '月', '火', '水', '木', '金', '土'];
 
 function pad(n: number): string { return String(n).padStart(2, '0'); }
@@ -34,13 +34,15 @@ function todayJstYmd(): string {
 }
 
 export default function ConfirmedPage() {
+  const { organizerId, loading } = useOrganizerId();
   const [confs, setConfs] = useState<ConfRow[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [showPast, setShowPast] = useState(false);
 
   const load = useCallback(async () => {
+    if (!organizerId) return;
     try {
-      const params = new URLSearchParams({ organizerId: ORGANIZER_ID });
+      const params = new URLSearchParams({ organizerId });
       if (!showPast) params.set('from', todayJstYmd());
       const r = await fetch(`/api/confirmations?${params.toString()}`, { cache: 'no-store' });
       if (!r.ok) throw new Error(`status ${r.status}`);
@@ -56,13 +58,14 @@ export default function ConfirmedPage() {
       setErr(e instanceof Error ? e.message : '読み込みに失敗しました');
       setConfs([]);
     }
-  }, [showPast]);
+  }, [showPast, organizerId]);
 
   useEffect(() => {
+    if (loading) return;
     void load();
-  }, [load]);
+  }, [load, loading]);
 
-  const csvUrl = `/api/confirmations/csv?organizerId=${ORGANIZER_ID}`;
+  const csvUrl = `/api/confirmations/csv?organizerId=${encodeURIComponent(organizerId ?? '')}`;
 
   return (
     <main className="sc-list-page">

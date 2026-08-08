@@ -5,7 +5,8 @@
 import { NextResponse } from 'next/server';
 import { getRepository } from '@/repo/index';
 import { liveAvailabilityForPage, resolveSettings } from '@/service/booking';
-import { googleConfigFromEnv, googleFreeBusy } from '@/service/calendar/google';
+import { googleFreeBusy } from '@/service/calendar/google';
+import { googleConfigForUserId } from '@/service/calendar/tenant';
 import { ServiceError } from '@/service/errors';
 import { jsonError, slotToDto } from '@/service/http';
 import { assertValidSlug } from '@/service/security';
@@ -33,10 +34,11 @@ export async function GET(
 
     const cfg = resolveSettings(page.settings);
 
-    // Googleカレンダー連携（社長要望「僕のカレンダーと同期」）：環境変数で設定済みなら
-    // 主催者の実予定(freebusy)を取得して busy として差し引く。未設定/失敗時は [] でdegrade。
+    // Googleカレンダー連携：この API はゲスト（未ログイン）が公開ページから叩くので、
+    // セッションではなく **このページの主催者** のトークンで freebusy を取る。
+    // 未連携/失敗時は [] でdegrade（受付時間帯ベースの空きは出る）。
     let externalBusy: Interval[] = [];
-    const gcfg = googleConfigFromEnv();
+    const gcfg = await googleConfigForUserId(page.organizerId);
     if (gcfg) {
       externalBusy = await googleFreeBusy(gcfg, now, now + cfg.horizonDays * DAY_MS);
     }

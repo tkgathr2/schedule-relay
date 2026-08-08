@@ -9,7 +9,8 @@ import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { ServiceError } from '@/service/errors';
 import { jsonError } from '@/service/http';
-import { googleConfigFromEnv, createCalendarEventWithMeet } from '@/service/calendar/google';
+import { createCalendarEventWithMeet } from '@/service/calendar/google';
+import { googleConfigForEmail } from '@/service/calendar/tenant';
 
 let _client: PrismaClient | undefined;
 function db(): PrismaClient {
@@ -73,8 +74,7 @@ export async function POST(
       throw new ServiceError('VALIDATION', 'candidate のステージ数が一致しません');
     }
 
-    // ステージごとに検証＋仮押さえ
-    const cfg = googleConfigFromEnv();
+    // ステージごとに検証＋仮押さえ（カレンダー資格情報は担当者ごとに解決する）
     const created: {
       stageOrder: number;
       stageLabel: string;
@@ -127,10 +127,12 @@ export async function POST(
         throw new ServiceError('VALIDATION', `stage ${cand.stage} は存在しません`);
       }
 
-      // Googleカレンダー予定作成（cfgがある場合のみ）。失敗時は null（degrade-safe）。
+      // Googleカレンダー予定作成：**このステージの担当者本人**のトークンで作る。
+      // 担当者が未ログイン（トークン無し）／API 失敗時は null（degrade-safe：DB の仮押さえは残る）。
       let googleEventId: string | null = null;
       let googleEventLink: string | null = null;
-      if (cfg && stage.calendarIds.length > 0) {
+      const cfg = stage.calendarIds.length > 0 ? await googleConfigForEmail(stage.ownerEmail) : null;
+      if (cfg) {
         const targetCal = stage.calendarIds[0] ?? 'primary';
         const ev = await createCalendarEventWithMeet(cfg, {
           organizerCalendar: targetCal,

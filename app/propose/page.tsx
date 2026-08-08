@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import '../scheduler.css';
 import { moveRange, resizeEnd, nextBusyStart, hasConflict, groupSlots } from '../../src/domain/drag';
+import { useOrganizerId } from '../_components/use-organizer-id';
 
 type Calendar = {
   id: string;
@@ -132,6 +133,7 @@ function hexToRgba(hex: string | undefined, alpha: number): string {
 }
 
 export default function ProposePage() {
+  const { organizerId } = useOrganizerId();
   // 設定
   const [title, setTitle] = useState('');
   const [aiContext, setAiContext] = useState('');
@@ -400,8 +402,12 @@ export default function ProposePage() {
   }
 
   async function applySelected() {
-    setApplying(true);
     setApplyErr(null);
+    if (!organizerId) {
+      setApplyErr('ログイン情報を取得できませんでした。再読み込みしてください。');
+      return;
+    }
+    setApplying(true);
     try {
       const slug = randSlug();
       const settings = {
@@ -422,7 +428,7 @@ export default function ProposePage() {
       const res = await fetch('/api/pages', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ organizerId: 'takagi', type: adjType, slug, settings }),
+        body: JSON.stringify({ organizerId, type: adjType, slug, settings }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error?.message || '作成に失敗しました');

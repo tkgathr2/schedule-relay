@@ -1,30 +1,11 @@
 /**
  * Google Calendar 連携の degrade-safe 検証。
  * 認証情報が無い／API失敗時は null/[] を返し、確定/availability が壊れないこと。
+ * ※ 設定の組み立ては env 直読み（googleConfigFromEnv）から
+ *    src/service/calendar/tenant.ts の buildGoogleConfig（ユーザー単位）へ移行済み。
  */
-import { describe, it, expect, afterEach } from 'vitest';
-import { createCalendarEventWithMeet, googleConfigFromEnv, googleFreeBusy, googleFreeBusyByCalendar, googleEventTitlesByCalendar } from '../google.js';
-
-describe('googleConfigFromEnv', () => {
-  const saved = { ...process.env };
-  afterEach(() => { process.env = { ...saved }; });
-
-  it('必須環境変数が無ければ null（連携オフ）', () => {
-    delete process.env.GOOGLE_CLIENT_ID;
-    delete process.env.GOOGLE_CLIENT_SECRET;
-    delete process.env.GOOGLE_REFRESH_TOKEN;
-    expect(googleConfigFromEnv()).toBeNull();
-  });
-
-  it('3点セットが揃えば設定を返す', () => {
-    process.env.GOOGLE_CLIENT_ID = 'x';
-    process.env.GOOGLE_CLIENT_SECRET = 'y';
-    process.env.GOOGLE_REFRESH_TOKEN = 'z';
-    const cfg = googleConfigFromEnv();
-    expect(cfg).not.toBeNull();
-    expect(cfg?.calendarIds.length).toBeGreaterThan(0);
-  });
-});
+import { describe, it, expect } from 'vitest';
+import { createCalendarEventWithMeet, refreshGoogleAccessToken, googleFreeBusy, googleFreeBusyByCalendar, googleEventTitlesByCalendar } from '../google.js';
 
 describe('createCalendarEventWithMeet (degrade-safe)', () => {
   it('不正なrefresh tokenでも例外で落ちずに null を返す', async () => {
@@ -103,5 +84,17 @@ describe('googleEventTitlesByCalendar (degrade-safe)', () => {
       ['primary'],
     );
     expect(res).toEqual({});
+  }, 20000);
+});
+
+describe('refreshGoogleAccessToken (degrade-safe)', () => {
+  it('不正な資格情報でも例外で落ちずに false を返す', async () => {
+    const ok = await refreshGoogleAccessToken({
+      clientId: 'invalid',
+      clientSecret: 'invalid',
+      refreshToken: 'invalid-refresh',
+      calendarIds: ['primary'],
+    });
+    expect(ok).toBe(false);
   }, 20000);
 });

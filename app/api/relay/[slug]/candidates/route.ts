@@ -11,7 +11,8 @@ import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { ServiceError } from '@/service/errors';
 import { jsonError } from '@/service/http';
-import { googleConfigFromEnv, googleFreeBusy } from '@/service/calendar/google';
+import { googleFreeBusy } from '@/service/calendar/google';
+import { googleConfigForEmail } from '@/service/calendar/tenant';
 import { computeRelayCandidates, type RelayStageDef } from '@/service/relay-link';
 import type { Interval } from '@/domain/types';
 
@@ -68,25 +69,27 @@ export async function POST(
       ? link.endDate.getTime()
       : now + (link.maxGapDays + 7) * 24 * 60 * 60 * 1000;
 
-    // Google busy 取得（カレンダーごとに並列）。失敗時は []（degrade-safe）。
-    const cfg = googleConfigFromEnv();
+    // Google busy 取得（ステージごとに並列）。
+    // マルチテナント化により、固定の1本ではなく **各ステージ担当者(ownerEmail)本人**の
+    // トークンで freebusy を引く。担当者が未ログイン＝トークン未取得なら busy=[]（degrade-safe）。
     const busyByStage = new Map<number, Interval[]>();
-    if (cfg) {
-      await Promise.all(
-        stages.map(async (s) => {
-          if (s.calendarIds.length === 0) {
-            busyByStage.set(s.order, []);
-            return;
-          }
-          const busy = await googleFreeBusy(cfg, periodStart, periodEnd, {
-            calendarIds: s.calendarIds,
-          });
-          busyByStage.set(s.order, busy);
-        }),
-      );
-    } else {
-      for (const s of stages) busyByStage.set(s.order, []);
-    }
+    await Promise.all(
+      stages.map(async (s) => {
+        if (s.calendarIds.length === 0) {
+          busyByStage.set(s.order, []);
+          return;
+        }
+        const cfg = await googleConfigForEmail(s.ownerEmail);
+        if (!cfg) {
+          busyByStage.set(s.order, []);
+          return;
+        }
+        const busy = await googleFreeBusy(cfg, periodStart, periodEnd, {
+          calendarIds: s.calendarIds,
+        });
+        busyByStage.set(s.order, busy);
+      }),
+    );
 
     const maxCandidates =
       typeof body.maxCandidates === 'number' && Number.isFinite(body.maxCandidates)

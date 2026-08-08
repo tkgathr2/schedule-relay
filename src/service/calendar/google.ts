@@ -3,8 +3,10 @@
  * これを liveAvailabilityForPage の externalBusy に渡すと、主催者の実予定が空き枠から自動で消える
  * （社長要望「僕のカレンダーと同期して」）。
  *
- * 認証は単一テナント（高木さん）想定：OAuth2 リフレッシュトークンを環境変数で持ち、
- * サーバ側で freebusy.query を叩く。資格情報が無い／失敗した場合は [] を返して degrade-safe
+ * 認証はマルチテナント：GoogleCalendarConfig（リフレッシュトークン込み）は
+ * src/service/calendar/tenant.ts が「ログイン中ユーザー」または「そのページの主催者」の
+ * Account 行から組み立てて渡す。本ファイルは env を一切見ない純粋な API クライアント。
+ * 資格情報が無い／失敗した場合は [] を返して degrade-safe
  * （カレンダー連携が無くても受付時間帯ベースの空きは出る）。
  */
 import { google } from 'googleapis';
@@ -19,18 +21,25 @@ export interface GoogleCalendarConfig {
   calendarIds: string[];
 }
 
-/** 環境変数から設定を読む。未設定なら null（連携オフ）。 */
-export function googleConfigFromEnv(): GoogleCalendarConfig | null {
-  const clientId = process.env.GOOGLE_CLIENT_ID;
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-  const refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
-  if (!clientId || !clientSecret || !refreshToken) return null;
-  // 'auto'（既定）＝主催者の全カレンダーを自動取得して freebusy 対象にする（Spir同様）。
-  const ids = (process.env.GOOGLE_CALENDAR_IDS || 'auto')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return { clientId, clientSecret, refreshToken, calendarIds: ids.length ? ids : ['auto'] };
+/**
+ * リフレッシュトークンを実際に使ってアクセストークンを取り直す（成功なら true）。
+ *
+ * 目的は「トークンの取得」ではなく「トークンを使うこと」そのもの。
+ * Google のリフレッシュトークンは **6ヶ月間一度も使われない**と自動的に失効するため、
+ * ユーザーが長期間ログインしなくても月次で叩いて生かし続ける（/api/auth/refresh-keepalive）。
+ *
+ * 毎回新しい OAuth2 インスタンスを作る＝アクセストークンのキャッシュが無いので、
+ * getAccessToken() は必ず Google のトークンエンドポイントへ往復する。
+ */
+export async function refreshGoogleAccessToken(cfg: GoogleCalendarConfig): Promise<boolean> {
+  try {
+    const oauth2 = new google.auth.OAuth2(cfg.clientId, cfg.clientSecret);
+    oauth2.setCredentials({ refresh_token: cfg.refreshToken });
+    const res = await oauth2.getAccessToken();
+    return typeof res?.token === 'string' && res.token.length > 0;
+  } catch {
+    return false;
+  }
 }
 
 /**
