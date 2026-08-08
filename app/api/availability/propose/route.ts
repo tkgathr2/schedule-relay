@@ -15,7 +15,8 @@
  * env未設定/Google失敗時は busy=[] でdegrade-safe（営業時間ベースの候補を返す）。
  */
 import { NextResponse } from 'next/server';
-import { googleConfigFromEnv, googleFreeBusy, googleFreeBusyByCalendar, googleEventTitlesByCalendar } from '@/service/calendar/google';
+import { googleFreeBusy, googleFreeBusyByCalendar, googleEventTitlesByCalendar } from '@/service/calendar/google';
+import { googleConfigForCurrentUser } from '@/service/calendar/tenant';
 import { proposeSlots } from '@/service/propose';
 import { ServiceError } from '@/service/errors';
 import { jsonError, slotToDto } from '@/service/http';
@@ -58,11 +59,12 @@ export async function POST(req: Request): Promise<NextResponse> {
 
     const workingHours = body.workingHours as WorkingHours | undefined;
 
-    // Googleカレンダー連携（env設定済み＆カレンダー選択あり）→ busy取得。失敗時は[]。
+    // Googleカレンダー連携：**ログイン中の本人**のトークンで busy 取得。
+    // （この API は主催者専用＝middleware が未ログインを 401 で弾く）
     let busy: { start: number; end: number }[] = [];
     let busyByCalendar: Record<string, { start: number; end: number }[]> = {};
     let titlesByCalendar: Record<string, { start: number; end: number; title: string }[]> = {};
-    const cfg = googleConfigFromEnv();
+    const cfg = await googleConfigForCurrentUser();
     if (cfg && calendarIds.length > 0) {
       // freebusy（マージ版）／freebusy（カレンダーごと）／events.list（タイトル）を並列実行
       const [merged, byCal, titles] = await Promise.all([

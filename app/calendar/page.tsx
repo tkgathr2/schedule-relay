@@ -90,9 +90,9 @@ export default function CalendarPage() {
   const [loading, setLoading] = useState(false);
   const [viewWeekStart, setViewWeekStart] = useState<number>(() => startOfWeekJst(Date.now()));
 
-  // リンク一覧取得
+  // リンク一覧取得（主催者はサーバ側でセッションから決まる）
   useEffect(() => {
-    fetch('/api/pages?organizerId=takagi', { cache: 'no-store' })
+    fetch('/api/pages', { cache: 'no-store' })
       .then((r) => r.json())
       .then((j: { pages: PageRow[] }) => {
         const clean = (j.pages || []).filter((p) => {

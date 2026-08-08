@@ -1,76 +1,16 @@
 /**
  * 管理ダッシュボード（admin）サービス層のテスト。
- *  - Basic 認証パーサ／判定
  *  - 一覧／カードの整形
+ * ※ Basic 認証（parseBasicAuth / checkAdminAuth）は Auth.js 一本化により削除済み。
+ *    ログイン許可の判定は src/service/auth/__tests__/allowlist.test.ts を参照。
  */
 import { describe, it, expect } from 'vitest';
 import {
   buildStats,
   buildTimeseries,
-  checkAdminAuth,
   formatLinkRows,
   formatRelayRows,
-  parseBasicAuth,
 } from '../admin.js';
-
-describe('parseBasicAuth', () => {
-  it('正常な Basic ヘッダを user/pass に分解する', () => {
-    const b64 = Buffer.from('alice:wonderland').toString('base64');
-    expect(parseBasicAuth(`Basic ${b64}`)).toEqual({ user: 'alice', pass: 'wonderland' });
-  });
-
-  it('パスワードに : を含んでも先頭の : で分割する', () => {
-    const b64 = Buffer.from('alice:s3:cret').toString('base64');
-    expect(parseBasicAuth(`Basic ${b64}`)).toEqual({ user: 'alice', pass: 's3:cret' });
-  });
-
-  it('Bearer など別スキームは null', () => {
-    expect(parseBasicAuth('Bearer xxx')).toBeNull();
-  });
-
-  it('null/空文字は null', () => {
-    expect(parseBasicAuth(null)).toBeNull();
-    expect(parseBasicAuth('')).toBeNull();
-  });
-
-  it(': を含まないペイロードは null', () => {
-    const b64 = Buffer.from('justname').toString('base64');
-    expect(parseBasicAuth(`Basic ${b64}`)).toBeNull();
-  });
-});
-
-describe('checkAdminAuth', () => {
-  it('NODE_ENV=test は常に ok（テスト中の配線不要）', () => {
-    expect(checkAdminAuth(null, { nodeEnv: 'test' })).toBe('ok');
-    expect(checkAdminAuth('Basic xxx', { nodeEnv: 'test' })).toBe('ok');
-  });
-
-  it('ADMIN_USER / ADMIN_PASS 未設定は unconfigured（fail-closed）', () => {
-    expect(checkAdminAuth(null, { nodeEnv: 'production' })).toBe('unconfigured');
-    expect(checkAdminAuth(null, { nodeEnv: 'production', adminUser: 'a' })).toBe('unconfigured');
-    expect(checkAdminAuth(null, { nodeEnv: 'production', adminPass: 'b' })).toBe('unconfigured');
-  });
-
-  it('ヘッダ無しは unauthorized', () => {
-    expect(
-      checkAdminAuth(null, { nodeEnv: 'production', adminUser: 'a', adminPass: 'b' }),
-    ).toBe('unauthorized');
-  });
-
-  it('user/pass 不一致は unauthorized', () => {
-    const b64 = Buffer.from('a:wrong').toString('base64');
-    expect(
-      checkAdminAuth(`Basic ${b64}`, { nodeEnv: 'production', adminUser: 'a', adminPass: 'b' }),
-    ).toBe('unauthorized');
-  });
-
-  it('user/pass 一致は ok', () => {
-    const b64 = Buffer.from('a:b').toString('base64');
-    expect(
-      checkAdminAuth(`Basic ${b64}`, { nodeEnv: 'production', adminUser: 'a', adminPass: 'b' }),
-    ).toBe('ok');
-  });
-});
 
 describe('formatLinkRows', () => {
   it('settings.title をタイトル、Map から確定件数を補完する', () => {

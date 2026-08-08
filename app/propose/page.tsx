@@ -400,8 +400,8 @@ export default function ProposePage() {
   }
 
   async function applySelected() {
-    setApplying(true);
     setApplyErr(null);
+    setApplying(true);
     try {
       const slug = randSlug();
       const settings = {
@@ -422,7 +422,8 @@ export default function ProposePage() {
       const res = await fetch('/api/pages', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ organizerId: 'takagi', type: adjType, slug, settings }),
+        // organizerId は送らない（サーバがセッションから決める）
+        body: JSON.stringify({ type: adjType, slug, settings }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error?.message || '作成に失敗しました');

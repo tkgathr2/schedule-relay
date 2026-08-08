@@ -16,7 +16,8 @@
 import { NextResponse } from 'next/server';
 import { getRepository } from '@/repo/index';
 import { liveAvailabilityForPage, resolveSettings } from '@/service/booking';
-import { googleConfigFromEnv, googleFreeBusy } from '@/service/calendar/google';
+import { googleFreeBusy } from '@/service/calendar/google';
+import { googleConfigForUserId } from '@/service/calendar/tenant';
 import { ServiceError } from '@/service/errors';
 import { jsonError } from '@/service/http';
 import { buildIcs, type IcsEvent } from '@/service/ical';
@@ -55,9 +56,10 @@ export async function GET(
       throw new ServiceError('VALIDATION', 'to は from より後である必要があります');
     }
 
-    // Google 連携：未設定/失敗時は busy=[] でdegrade（availability ルートと同様）。
+    // Google 連携：公開ページ由来なのでセッションではなく **主催者** のトークンを使う。
+    // 未連携/失敗時は busy=[] でdegrade（availability ルートと同様）。
     let externalBusy: Interval[] = [];
-    const gcfg = googleConfigFromEnv();
+    const gcfg = await googleConfigForUserId(page.organizerId);
     if (gcfg) {
       try {
         externalBusy = await googleFreeBusy(gcfg, from, to);

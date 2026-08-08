@@ -1,8 +1,9 @@
 'use client';
 /**
  * /confirmed — 確定済の予定一覧（Spir同等）。
- * GET /api/confirmations?organizerId=takagi&from=YYYY-MM-DD をデータ源にテーブル表示。
- * CSV ダウンロードは GET /api/confirmations/csv?organizerId=takagi。
+ * GET /api/confirmations?from=YYYY-MM-DD をデータ源にテーブル表示。
+ * CSV ダウンロードは GET /api/confirmations/csv。
+ * どちらも主催者はサーバ側でセッションから決まる（クライアントは organizerId を送らない）。
  */
 import { useCallback, useEffect, useState } from 'react';
 
@@ -17,7 +18,6 @@ type ConfRow = {
   page: { id: string; organizerId: string; settings: { title?: string } | null } | null;
 };
 
-const ORGANIZER_ID = 'takagi';
 const DOW = ['日', '月', '火', '水', '木', '金', '土'];
 
 function pad(n: number): string { return String(n).padStart(2, '0'); }
@@ -40,7 +40,7 @@ export default function ConfirmedPage() {
 
   const load = useCallback(async () => {
     try {
-      const params = new URLSearchParams({ organizerId: ORGANIZER_ID });
+      const params = new URLSearchParams();
       if (!showPast) params.set('from', todayJstYmd());
       const r = await fetch(`/api/confirmations?${params.toString()}`, { cache: 'no-store' });
       if (!r.ok) throw new Error(`status ${r.status}`);
@@ -62,7 +62,7 @@ export default function ConfirmedPage() {
     void load();
   }, [load]);
 
-  const csvUrl = `/api/confirmations/csv?organizerId=${ORGANIZER_ID}`;
+  const csvUrl = '/api/confirmations/csv';
 
   return (
     <main className="sc-list-page">

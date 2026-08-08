@@ -1,78 +1,22 @@
 /**
- * Next.js Middleware — 全レスポンスに標準セキュリティヘッダを付与する。
- * Cache-Control は触らない（既存「文字化け二重防御」/各 route 個別設定と整合）。
+ * Next.js Middleware — 全レスポンスに標準セキュリティヘッダを付与し、
+ * 公開導線を除く全ページ・全 API に **Auth.js のセッション認証**を要求する。
  *
- * 🚨 緊急セキュリティパッチ（2026-08-06）：Basic 認証ゲートを /admin 系だけでなく
- * **公開導線を除く全ページ・全 API** に拡張した。
- * Auth.js は未実装のまま本番稼働しており、/propose・/api/google/calendars 等から
- * 社長本人のカレンダーID・予定（取引先名・採用候補者名を含む）が無認証で読めていたため。
- * 本格的な Auth.js 実装までの暫定措置。
+ * 履歴：
+ *  - 2026-08-06 緊急セキュリティパッチで Basic 認証（ADMIN_USER/ADMIN_PASS）を全面に張った暫定措置。
+ *  - 本コミットで Auth.js (NextAuth v5 / Google OAuth) に一本化。Basic 認証は完全撤去。
  *
- *  - ADMIN_USER / ADMIN_PASS が未設定なら 503（誤って無認証で晒さない fail-closed）。
- *  - NODE_ENV=test ではスキップ（vitest を煩わせない）。
- *  - 判定は default-deny：isPublicPath() の allowlist に無いパスは全て要認証。
- *    → 今後ルートを追加しても既定で保護される。
+ * Edge 制約：middleware は Edge ランタイムで動くため Prisma を import できない。
+ * そのため auth.config.ts（Adapter 抜きの Edge セーフ設定）だけを使い、
+ * セッション戦略は JWT にしてある（詳細は auth.config.ts のコメント）。
+ *
+ * どのパスを通すかの判定は src/service/auth/gate.ts（純関数・テスト済み）に置いてある。
  */
-import { NextResponse, type NextRequest } from 'next/server';
+import NextAuth from 'next-auth';
+import { NextResponse } from 'next/server';
 import { SECURITY_HEADERS } from './src/service/security';
-import { checkAdminAuth } from './src/service/admin';
-
-/**
- * 認証不要で公開してよいパスか判定する（allowlist）。
- * 基準＝「相手に送るための公開URL」と「それが動くのに必要な最小限のAPI/静的アセット」だけ true。
- * 主催者（社長）専用の管理画面・API は全て false（＝要認証）。
- *
- * @param pathname URL パス
- * @param method   HTTP メソッド（HEAD は GET とみなす）
- */
-export function isPublicPath(pathname: string, method: string): boolean {
-  const m = method === 'HEAD' ? 'GET' : method;
-
-  // ランディングページ（ダミーデータのみ・実データ無し）
-  if (pathname === '/') return true;
-
-  // PWA マニフェスト・アイコン等：公開ページの表示時にブラウザが必ず取りに来る。
-  // 保護すると /b/ 等の公開ページで Basic 認証ダイアログが暴発する。
-  if (
-    pathname === '/manifest.webmanifest' ||
-    pathname === '/robots.txt' ||
-    pathname === '/sitemap.xml' ||
-    pathname.startsWith('/icons/')
-  ) {
-    return true;
-  }
-
-  // ヘルスチェック（Railway / 外形監視）
-  if (pathname === '/api/health') return true;
-
-  // 空き時間リンクの公開予約ページ（相手に送るURL）と、その ical ダウンロード
-  if (pathname === '/b' || pathname.startsWith('/b/')) return true;
-  if (pathname.startsWith('/api/b/')) return true;
-
-  // リレー型の進行ページ（担当者に送るURL）
-  if (pathname === '/r' || pathname.startsWith('/r/')) return true;
-
-  // リレー公開ページ／API。ただし「作成」系は主催者専用なので保護する。
-  if (pathname === '/relay/new' || pathname.startsWith('/relay/new/')) return false;
-  if (pathname.startsWith('/relay/')) return true;
-  if (pathname === '/api/relay/create') return false;
-  if (pathname.startsWith('/api/relay/')) return true;
-
-  // 公開ページが予約フローで叩く必要のある API のみ、メソッドまで限定して開放する。
-  //  - GET /api/pages/{slug}/availability : /b/{slug} の空き枠取得
-  //  - POST /api/events                   : /b/{slug} の予約（イベント作成）
-  //  - POST /api/events/{id}/holds|confirm: /b/{slug} の仮押さえ・確定
-  //  - GET  /api/events/{id}/relay        : /r/{eventId} のステップ取得
-  //  - POST /api/events/{id}/relay/advance: /r/{eventId} の枠確定
-  // ※ GET /api/events（一覧）や POST /api/pages（作成）は開けない（情報漏洩・悪用防止）。
-  if (m === 'GET' && /^\/api\/pages\/[^/]+\/availability$/.test(pathname)) return true;
-  if (m === 'POST' && pathname === '/api/events') return true;
-  if (m === 'POST' && /^\/api\/events\/[^/]+\/(holds|confirm)$/.test(pathname)) return true;
-  if (m === 'GET' && /^\/api\/events\/[^/]+\/relay$/.test(pathname)) return true;
-  if (m === 'POST' && /^\/api\/events\/[^/]+\/relay\/advance$/.test(pathname)) return true;
-
-  return false;
-}
+import { decideGate, sessionStateOf } from './src/service/auth/gate';
+import { authConfig } from './auth.config';
 
 function applySecurityHeaders(res: NextResponse): NextResponse {
   for (const [k, v] of Object.entries(SECURITY_HEADERS)) {
@@ -81,36 +25,53 @@ function applySecurityHeaders(res: NextResponse): NextResponse {
   return res;
 }
 
-export function middleware(req: NextRequest): NextResponse {
-  const pathname = req.nextUrl?.pathname ?? new URL(req.url).pathname;
-  if (!isPublicPath(pathname, req.method ?? 'GET')) {
-    const result = checkAdminAuth(req.headers.get('authorization'), {
-      nodeEnv: process.env.NODE_ENV,
-      adminUser: process.env.ADMIN_USER,
-      adminPass: process.env.ADMIN_PASS,
-    });
-    if (result === 'unconfigured') {
-      return applySecurityHeaders(
-        new NextResponse(
-          JSON.stringify({ error: 'ADMIN_USER / ADMIN_PASS が未設定です' }),
-          { status: 503, headers: { 'Content-Type': 'application/json' } },
-        ),
-      );
-    }
-    if (result === 'unauthorized') {
-      return applySecurityHeaders(
-        new NextResponse('Authentication required', {
-          status: 401,
-          headers: {
-            'WWW-Authenticate': 'Basic realm="schedule-relay admin"',
-            'Content-Type': 'text/plain; charset=utf-8',
-          },
-        }),
-      );
-    }
-  }
-  return applySecurityHeaders(NextResponse.next());
+const { auth } = NextAuth(authConfig);
+
+function jsonResponse(status: number, code: string, message: string): NextResponse {
+  return applySecurityHeaders(
+    new NextResponse(JSON.stringify({ error: message, code }), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  );
 }
+
+export default auth((req) => {
+  const nextUrl = req.nextUrl ?? new URL(req.url);
+
+  // 許可リストは**毎リクエスト**評価する。セッションは長期有効なので、
+  // ALLOWED_EMAILS から外した人を即座に締め出せるようにするため（H3）。
+  const state = sessionStateOf(
+    req.auth?.user?.email,
+    process.env.ALLOWED_EMAILS,
+    !!req.auth,
+  );
+
+  const decision = decideGate(nextUrl.pathname, req.method ?? 'GET', state, nextUrl.search ?? '');
+
+  switch (decision.kind) {
+    case 'unauthorized':
+      return jsonResponse(401, 'UNAUTHORIZED', 'ログインが必要です');
+
+    case 'forbidden':
+      return jsonResponse(403, 'FORBIDDEN', 'このアカウントは利用を許可されていません');
+
+    case 'accessDenied': {
+      const url = new URL('/auth/error', nextUrl.origin);
+      url.searchParams.set('error', 'AccessDenied');
+      return applySecurityHeaders(NextResponse.redirect(url));
+    }
+
+    case 'signin': {
+      const url = new URL('/auth/signin', nextUrl.origin);
+      url.searchParams.set('callbackUrl', decision.callbackUrl);
+      return applySecurityHeaders(NextResponse.redirect(url));
+    }
+
+    default:
+      return applySecurityHeaders(NextResponse.next());
+  }
+});
 
 export const config = {
   // _next 内部・静的ファイル・favicon は除外（不要なヘッダ付与のオーバーヘッド回避）

@@ -1,8 +1,11 @@
 /**
  * POST /api/pages — 予約ページ作成（§14）。
- * body: { organizerId, type, slug, settings }
+ * body: { type, slug, settings }
  *
- * GET /api/pages?organizerId=<id> — 予約ページ一覧（ダッシュボード用・/links 画面のデータ源）。
+ * GET /api/pages — 予約ページ一覧（ダッシュボード用・/links 画面のデータ源）。
+ *
+ * 🔒 organizerId は**セッションから引く**。クエリ/ボディで渡された organizerId は無視する。
+ *    （2026-08-08 セキュリティレビュー H1：他人の organizerId を騙れる IDOR の修正）
  */
 import { NextResponse } from 'next/server';
 import { getRepository } from '@/repo/index';
@@ -11,16 +14,15 @@ import { ServiceError } from '@/service/errors';
 import { jsonError } from '@/service/http';
 import { rateLimit } from '@/service/rate-limit';
 import { assertValidSlug } from '@/service/security';
+import { requireSessionUserId } from '@/service/auth/session';
 
 const VALID_TYPES: AdjustmentType[] = ['T1', 'T2', 'T3', 'T4', 'T5', 'T6'];
 
 export async function GET(req: Request): Promise<NextResponse> {
   try {
     const url = new URL(req.url);
-    const organizerId = url.searchParams.get('organizerId') ?? '';
-    if (!organizerId) {
-      throw new ServiceError('VALIDATION', 'organizerId は必須です');
-    }
+    // クエリの organizerId は受け付けない（他人のリンク一覧を覗けてしまうため）。
+    const organizerId = await requireSessionUserId();
     const repo = getRepository();
     const all = await repo.listPagesByOrganizer(organizerId);
     // 既定で isActive=true のみ返す。?includeInactive=1 で全件。
@@ -41,10 +43,12 @@ export async function POST(req: Request): Promise<NextResponse> {
     const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
     if (!body) throw new ServiceError('VALIDATION', 'JSON ボディが必要です');
 
-    const organizerId = typeof body.organizerId === 'string' ? body.organizerId : '';
+    // body.organizerId は無視してセッションの user.id を使う。
+    // （他人の User.id で予約ページを作られると、その公開ページ経由で
+    //   被害者の Google カレンダーの freebusy が読めてしまう）
+    const organizerId = await requireSessionUserId();
     const slug = typeof body.slug === 'string' ? body.slug.trim() : '';
     const type = body.type as AdjustmentType;
-    if (!organizerId) throw new ServiceError('VALIDATION', 'organizerId は必須です');
     if (!slug) throw new ServiceError('VALIDATION', 'slug は必須です');
     assertValidSlug(slug);
     if (!VALID_TYPES.includes(type)) throw new ServiceError('VALIDATION', 'type が不正です');

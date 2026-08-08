@@ -14,9 +14,37 @@ Spir（spirinc.com）の全調整機能と同等以上を満たしつつ、Spir�
 |---|---|
 | アプリ | Next.js 15 (App Router) + TypeScript |
 | DB | PostgreSQL + Prisma（Railway） |
-| 認証 | ⚠️ **Auth.js は未実装**。現状は `middleware.ts` の Basic 認証（`ADMIN_USER`/`ADMIN_PASS`）が公開導線を除く全ページ・全APIを保護する暫定措置。Auth.js（Google / Microsoft・セッション180日）は次フェーズ |
-| カレンダー | googleapis（freebusy）/ microsoft-graph（getSchedule） |
+| 認証 | **Auth.js (NextAuth v5) + Google OAuth**。`middleware.ts` が公開導線を除く全ページ・全APIをセッションで保護（default-deny）。セッションは **30日ローリング**（使い続ける限り再ログイン不要）。ログインできるのは `ALLOWED_EMAILS` に載ったアドレスのみで、**毎リクエスト再評価**される |
+| 認可 | `organizerId` は**必ずサーバ側でセッションから引く**。クライアントから受け取らない（クエリ/ボディに入っていても無視する） |
+| カレンダー | googleapis（freebusy）**マルチテナント**：カレンダーの中身はDBに保存せず、ログイン本人（または対象ページの主催者）の `Account.refresh_token` でその場でGoogle APIを叩く |
 | テスト | vitest |
+
+### 認証まわりの環境変数
+
+| 変数 | 必須 | 用途 |
+|---|---|---|
+| `AUTH_SECRET` | ✅ | セッションJWTの署名鍵。`npx auth secret` で生成 |
+| `NEXTAUTH_URL` | ✅(本番) | `https://schedule.takagi.bz`。OAuthコールバックURLの組み立てに使う |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | ✅ | 既存のものを流用。Auth.js の `AUTH_GOOGLE_ID`/`AUTH_GOOGLE_SECRET` にもフォールバック |
+| `ALLOWED_EMAILS` | ✅ | ログインを許可するメールアドレス（カンマ区切り）。**未設定なら誰もログインできない**（fail-closed） |
+| `CRON_SECRET` | ✅ | `/api/auth/refresh-keepalive` を叩く月次cronの共有シークレット |
+| `GOOGLE_CALENDAR_IDS` | 任意 | 既定 `auto`（そのユーザーの全カレンダー）。明示指定したい場合のみ |
+| ~~`GOOGLE_REFRESH_TOKEN`~~ | ❌ 廃止 | 単一テナント時代の固定トークン。マルチテナント化で不要（削除してよい） |
+| ~~`ADMIN_USER` / `ADMIN_PASS`~~ | ❌ 廃止 | 暫定Basic認証。Auth.js 一本化で不要（削除してよい） |
+
+Google Cloud Console 側には **承認済みリダイレクトURI `https://schedule.takagi.bz/api/auth/callback/google`** の登録が必要。
+
+**リフレッシュトークンの6ヶ月失効対策**：Googleのリフレッシュトークンは6ヶ月間一度も使われないと失効するため、
+`GET /api/auth/refresh-keepalive`（`Authorization: Bearer $CRON_SECRET`）を月次cronで叩き、
+全ユーザーのトークンを実際に使って生かし続ける。
+
+**アカウントを即座に締め出したいとき**：`ALLOWED_EMAILS` から該当アドレスを外して再デプロイする。
+middleware が毎リクエスト許可リストを再評価するので、既存セッションもその場で 403 になる
+（`AUTH_SECRET` のローテーション＝全員強制ログアウト、は不要）。
+
+**リレー型の担当者**：現フェーズでは `stages[].ownerEmail` に**自分以外を指定できない**。
+他人のカレンダーを勝手に対象にできてしまうため、相手側が自分でログインして同意する
+双方向フローが実装されるまでは作成者本人に限定している。
 
 ## 実装状況（仕様 §25 フェーズ）
 

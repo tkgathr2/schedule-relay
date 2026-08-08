@@ -1,7 +1,7 @@
 'use client';
 /**
  * /links — 空き時間リンク一覧画面（Spir同等）。
- * GET /api/pages?organizerId=takagi をデータ源にテーブル表示。
+ * GET /api/pages をデータ源にテーブル表示（主催者はサーバ側でセッションから決まる）。
  */
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -15,8 +15,6 @@ type PageRow = {
   settings: { title?: string; duration_minutes?: number } | null;
   createdAt: number;
 };
-
-const ORGANIZER_ID = 'takagi';
 
 function fmtDate(ms: number): string {
   const d = new Date(ms);
@@ -36,7 +34,7 @@ export default function LinksPage() {
 
   const load = useCallback(async () => {
     try {
-      const r = await fetch(`/api/pages?organizerId=${ORGANIZER_ID}`, { cache: 'no-store' });
+      const r = await fetch('/api/pages', { cache: 'no-store' });
       if (!r.ok) throw new Error(`status ${r.status}`);
       const j = (await r.json()) as { pages: PageRow[] };
       // 二重防御：化け文字（U+FFFD = ）を含むタイトルはDB側のレガシー破損データ

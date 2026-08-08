@@ -91,7 +91,8 @@ export default function CreatePage() {
       const res = await fetch('/api/pages', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ organizerId: 'takagi', type: 'T1', slug: slug.trim(), settings }),
+        // organizerId は送らない（サーバがセッションから決める）
+        body: JSON.stringify({ type: 'T1', slug: slug.trim(), settings }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error?.message || '作成に失敗しました');

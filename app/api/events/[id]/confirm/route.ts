@@ -6,7 +6,8 @@
 import { NextResponse } from 'next/server';
 import { getRepository } from '@/repo/index';
 import { confirmHold } from '@/service/booking';
-import { createCalendarEventWithMeet, googleConfigFromEnv } from '@/service/calendar/google';
+import { createCalendarEventWithMeet } from '@/service/calendar/google';
+import { googleConfigForUserId } from '@/service/calendar/tenant';
 import { ServiceError } from '@/service/errors';
 import { jsonError, serverNow, slotToDto } from '@/service/http';
 
@@ -32,10 +33,12 @@ export async function POST(
     let meetUrl: string | null = null;
     let calendarEventLink: string | null = null;
     try {
-      const gcfg = googleConfigFromEnv();
+      // 予定を作るのは **主催者本人のカレンダー**。ゲストにセッションは無いので
+      // イベント → ページ → organizerId（= User.id）からトークンを引く。
+      const event = await repo.getEvent(conf.eventId);
+      const page = event ? await repo.getPageById(event.pageId) : null;
+      const gcfg = page ? await googleConfigForUserId(page.organizerId) : null;
       if (gcfg) {
-        const event = await repo.getEvent(conf.eventId);
-        const page = event ? await repo.getPageById(event.pageId) : null;
         const fa = (body.formAnswers && typeof body.formAnswers === 'object') ? body.formAnswers as Record<string, unknown> : {};
         const summary = (page && (page.settings as { title?: unknown } | null)?.title && typeof (page.settings as { title?: unknown }).title === 'string')
           ? String((page.settings as { title?: unknown }).title)
