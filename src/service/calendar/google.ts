@@ -132,10 +132,12 @@ export async function listGoogleCalendars(
     const list = await cal.calendarList.list({ maxResults: 250, showHidden: true });
     const items = list.data.items ?? [];
     return items
-      .filter((c): c is { id: string; summary?: string | null; backgroundColor?: string | null; primary?: boolean | null; accessRole?: string | null } => !!c.id)
+      .filter((c): c is { id: string; summary?: string | null; summaryOverride?: string | null; backgroundColor?: string | null; primary?: boolean | null; accessRole?: string | null } => !!c.id)
       .map((c) => ({
         id: c.id,
-        summary: c.summary ?? c.id,
+        // summaryOverride：Googleカレンダー画面で本人がつけた表示名
+        // （「久原さん会社」等）。未設定なら元のカレンダー名（メールアドレス等）。
+        summary: c.summaryOverride ?? c.summary ?? c.id,
         backgroundColor: c.backgroundColor ?? undefined,
         primary: c.primary ?? false,
         accessRole: c.accessRole ?? undefined,
