@@ -37,13 +37,7 @@ export default function UnconfirmedPage() {
       const r = await fetch('/api/events?status=open|holding', { cache: 'no-store' });
       if (!r.ok) throw new Error(`status ${r.status}`);
       const j = (await r.json()) as { events: EventRow[] };
-      // 化け文字（U+FFFD）を含む title はレガシー破損データ扱いで一覧から除外
-      const clean = (j.events || []).filter((ev) => {
-        const t = (ev as unknown as { settings?: { title?: unknown } }).settings?.title;
-        if (typeof t !== 'string') return true;
-        return !t.includes('�');
-      });
-      setEvents(clean);
+      setEvents(j.events || []);
     } catch (e) {
       setErr(e instanceof Error ? e.message : '読み込みに失敗しました');
       setEvents([]);
@@ -105,7 +99,16 @@ export default function UnconfirmedPage() {
               </thead>
               <tbody>
                 {events.map((e) => {
-                  const title = e.page?.settings?.title || '(無題)';
+                  // 化け文字（U+FFFD）を含むタイトルはレガシー破損データ。
+                  // 元の文字列は失われているため復元できず、代替表示にする
+                  // （調整自体は相手の返事待ち中の可能性があるため一覧からは消さない）。
+                  const rawTitle = e.page?.settings?.title;
+                  const title =
+                    typeof rawTitle === 'string' && rawTitle.length > 0
+                      ? rawTitle.includes('�')
+                        ? '(タイトル取得不可・文字化けデータ)'
+                        : rawTitle
+                      : '(無題)';
                   const dur = fmtDuration(e.page?.settings?.duration_minutes);
                   const participants = e.page?.settings?.participants?.join('・') || '—';
                   return (
