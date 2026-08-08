@@ -1,11 +1,11 @@
 'use client';
 /**
  * /confirmed — 確定済の予定一覧（Spir同等）。
- * GET /api/confirmations?organizerId=<ログイン中のuser.id>&from=YYYY-MM-DD をデータ源にテーブル表示。
- * CSV ダウンロードは GET /api/confirmations/csv?organizerId=<同>。
+ * GET /api/confirmations?from=YYYY-MM-DD をデータ源にテーブル表示。
+ * CSV ダウンロードは GET /api/confirmations/csv。
+ * どちらも主催者はサーバ側でセッションから決まる（クライアントは organizerId を送らない）。
  */
 import { useCallback, useEffect, useState } from 'react';
-import { useOrganizerId } from '../_components/use-organizer-id';
 
 type ConfRow = {
   id: string;
@@ -34,15 +34,13 @@ function todayJstYmd(): string {
 }
 
 export default function ConfirmedPage() {
-  const { organizerId, loading } = useOrganizerId();
   const [confs, setConfs] = useState<ConfRow[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [showPast, setShowPast] = useState(false);
 
   const load = useCallback(async () => {
-    if (!organizerId) return;
     try {
-      const params = new URLSearchParams({ organizerId });
+      const params = new URLSearchParams();
       if (!showPast) params.set('from', todayJstYmd());
       const r = await fetch(`/api/confirmations?${params.toString()}`, { cache: 'no-store' });
       if (!r.ok) throw new Error(`status ${r.status}`);
@@ -58,14 +56,13 @@ export default function ConfirmedPage() {
       setErr(e instanceof Error ? e.message : '読み込みに失敗しました');
       setConfs([]);
     }
-  }, [showPast, organizerId]);
+  }, [showPast]);
 
   useEffect(() => {
-    if (loading) return;
     void load();
-  }, [load, loading]);
+  }, [load]);
 
-  const csvUrl = `/api/confirmations/csv?organizerId=${encodeURIComponent(organizerId ?? '')}`;
+  const csvUrl = '/api/confirmations/csv';
 
   return (
     <main className="sc-list-page">

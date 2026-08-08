@@ -1,7 +1,8 @@
 /**
- * GET /api/confirmations?organizerId=<id>&from=YYYY-MM-DD
+ * GET /api/confirmations?from=YYYY-MM-DD
  *   確定済の予定一覧（/confirmed 画面のデータ源）。
- *   - organizerId 指定時：その主催者の確定一覧。
+ *   - 対象は**ログイン中ユーザーが主催者の確定のみ**（organizerId はセッションから引く）。
+ *     クエリで organizerId を渡しても無視する（2026-08-08 レビュー H1）。
  *   - from 指定時：start >= from の予定のみ。YYYY-MM-DD（その日の00:00 JST）として解釈。
  *   - 並び順は start 降順。
  *   - 関連 BookingPage（settings.title）を join して返す。
@@ -10,6 +11,7 @@ import { NextResponse } from 'next/server';
 import { getRepository } from '@/repo/index';
 import { ServiceError } from '@/service/errors';
 import { jsonError } from '@/service/http';
+import { requireSessionUserId } from '@/service/auth/session';
 
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 
@@ -30,7 +32,7 @@ function parseDateMs(raw: string | null): number | undefined {
 export async function GET(req: Request): Promise<NextResponse> {
   try {
     const url = new URL(req.url);
-    const organizerId = url.searchParams.get('organizerId') ?? undefined;
+    const organizerId = await requireSessionUserId();
     const fromMs = parseDateMs(url.searchParams.get('from'));
 
     const repo = getRepository();

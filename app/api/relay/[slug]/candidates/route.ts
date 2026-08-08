@@ -12,7 +12,7 @@ import { PrismaClient } from '@prisma/client';
 import { ServiceError } from '@/service/errors';
 import { jsonError } from '@/service/http';
 import { googleFreeBusy } from '@/service/calendar/google';
-import { googleConfigForEmail } from '@/service/calendar/tenant';
+import { googleConfigForUserId } from '@/service/calendar/tenant';
 import { computeRelayCandidates, type RelayStageDef } from '@/service/relay-link';
 import type { Interval } from '@/domain/types';
 
@@ -69,18 +69,15 @@ export async function POST(
       ? link.endDate.getTime()
       : now + (link.maxGapDays + 7) * 24 * 60 * 60 * 1000;
 
-    // Google busy 取得（ステージごとに並列）。
-    // マルチテナント化により、固定の1本ではなく **各ステージ担当者(ownerEmail)本人**の
-    // トークンで freebusy を引く。担当者が未ログイン＝トークン未取得なら busy=[]（degrade-safe）。
+    // 🔒 Google busy 取得。本ルートは**未認証で叩ける公開API**なので、
+    // stages[].ownerEmail（＝リクエスト時に書き込まれた任意の文字列）からトークンを
+    // 引いてはいけない。作成時に検証済みの createdByUserId からのみ解決する。
+    // 旧データ（createdByUserId=null）は連携オフ扱い＝fail-closed。
+    const cfg = await googleConfigForUserId(link.createdByUserId);
     const busyByStage = new Map<number, Interval[]>();
     await Promise.all(
       stages.map(async (s) => {
-        if (s.calendarIds.length === 0) {
-          busyByStage.set(s.order, []);
-          return;
-        }
-        const cfg = await googleConfigForEmail(s.ownerEmail);
-        if (!cfg) {
+        if (!cfg || s.calendarIds.length === 0) {
           busyByStage.set(s.order, []);
           return;
         }

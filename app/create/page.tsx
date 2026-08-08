@@ -5,7 +5,6 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import '../scheduler.css';
-import { useOrganizerId } from '../_components/use-organizer-id';
 
 const TZ = 'Asia/Tokyo';
 
@@ -36,7 +35,6 @@ function randSlug(): string {
 }
 
 export default function CreatePage() {
-  const { organizerId } = useOrganizerId();
   const [adminTitle, setAdminTitle] = useState('');
   const [pubTitle, setPubTitle] = useState('');
   const [desc, setDesc] = useState('');
@@ -72,10 +70,6 @@ export default function CreatePage() {
 
   async function save() {
     setErr(null);
-    if (!organizerId) {
-      setErr('ログイン情報を取得できませんでした。再読み込みしてください。');
-      return;
-    }
     setSaving(true);
     try {
       const range = [start, end];
@@ -97,7 +91,8 @@ export default function CreatePage() {
       const res = await fetch('/api/pages', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ organizerId, type: 'T1', slug: slug.trim(), settings }),
+        // organizerId は送らない（サーバがセッションから決める）
+        body: JSON.stringify({ type: 'T1', slug: slug.trim(), settings }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error?.message || '作成に失敗しました');

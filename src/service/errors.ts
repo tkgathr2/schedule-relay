@@ -6,6 +6,7 @@
 export type ServiceErrorCode =
   | 'CONFLICT_HOLD'
   | 'EXPIRED'
+  | 'UNAUTHORIZED'
   | 'FORBIDDEN'
   | 'PAST_TIME'
   | 'GRID_VIOLATION'
@@ -19,6 +20,7 @@ export type ServiceErrorCode =
 const HTTP_STATUS: Record<ServiceErrorCode, number> = {
   CONFLICT_HOLD: 409,
   EXPIRED: 409,
+  UNAUTHORIZED: 401,
   FORBIDDEN: 403,
   PAST_TIME: 400,
   GRID_VIOLATION: 400,

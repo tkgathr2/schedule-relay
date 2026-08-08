@@ -1,11 +1,10 @@
 'use client';
 /**
  * /links — 空き時間リンク一覧画面（Spir同等）。
- * GET /api/pages?organizerId=<ログイン中のuser.id> をデータ源にテーブル表示。
+ * GET /api/pages をデータ源にテーブル表示（主催者はサーバ側でセッションから決まる）。
  */
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useOrganizerId } from '../_components/use-organizer-id';
 
 type PageRow = {
   id: string;
@@ -28,16 +27,14 @@ function fmtDate(ms: number): string {
 }
 
 export default function LinksPage() {
-  const { organizerId, loading } = useOrganizerId();
   const [pages, setPages] = useState<PageRow[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!organizerId) return;
     try {
-      const r = await fetch(`/api/pages?organizerId=${encodeURIComponent(organizerId)}`, { cache: 'no-store' });
+      const r = await fetch('/api/pages', { cache: 'no-store' });
       if (!r.ok) throw new Error(`status ${r.status}`);
       const j = (await r.json()) as { pages: PageRow[] };
       // 二重防御：化け文字（U+FFFD = ）を含むタイトルはDB側のレガシー破損データ
@@ -52,12 +49,11 @@ export default function LinksPage() {
       setErr(e instanceof Error ? e.message : '読み込みに失敗しました');
       setPages([]);
     }
-  }, [organizerId]);
+  }, []);
 
   useEffect(() => {
-    if (loading) return;
     void load();
-  }, [load, loading]);
+  }, [load]);
 
   const copy = async (slug: string) => {
     const url = `${window.location.origin}/b/${slug}`;

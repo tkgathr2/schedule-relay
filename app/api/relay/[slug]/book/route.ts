@@ -10,7 +10,9 @@ import { PrismaClient } from '@prisma/client';
 import { ServiceError } from '@/service/errors';
 import { jsonError } from '@/service/http';
 import { createCalendarEventWithMeet } from '@/service/calendar/google';
-import { googleConfigForEmail } from '@/service/calendar/tenant';
+import { googleConfigForUserId } from '@/service/calendar/tenant';
+import { getDb } from '@/service/db';
+import { validateStagesOwnedBy } from '@/service/relay-link';
 
 let _client: PrismaClient | undefined;
 function db(): PrismaClient {
@@ -74,7 +76,23 @@ export async function POST(
       throw new ServiceError('VALIDATION', 'candidate のステージ数が一致しません');
     }
 
-    // ステージごとに検証＋仮押さえ（カレンダー資格情報は担当者ごとに解決する）
+    // 🔒 本ルートは**未認証で叩ける公開API**で、Googleカレンダーへの書き込みと
+    // 招待メール送信という副作用を持つ。カレンダー資格情報は stages[].ownerEmail ではなく
+    // 作成時に検証済みの createdByUserId からのみ解決する（2026-08-08 レビュー H2）。
+    let cfg = await googleConfigForUserId(link.createdByUserId);
+
+    // さらに二重の防御：作成者本人が全ステージの担当者であることを再確認する。
+    // （create 側で担保済みだが、旧データや将来の書き込み経路に備える）
+    if (cfg && link.createdByUserId) {
+      const owner = await getDb()
+        .user.findUnique({ where: { id: link.createdByUserId }, select: { email: true } })
+        .catch(() => null);
+      if (validateStagesOwnedBy(stages, owner?.email)) {
+        // 担当者と作成者が食い違うリンクではカレンダーを一切触らない（DBの仮押さえのみ残す）。
+        cfg = null;
+      }
+    }
+
     const created: {
       stageOrder: number;
       stageLabel: string;
@@ -127,12 +145,11 @@ export async function POST(
         throw new ServiceError('VALIDATION', `stage ${cand.stage} は存在しません`);
       }
 
-      // Googleカレンダー予定作成：**このステージの担当者本人**のトークンで作る。
-      // 担当者が未ログイン（トークン無し）／API 失敗時は null（degrade-safe：DB の仮押さえは残る）。
+      // Googleカレンダー予定作成：作成者（＝全ステージの担当者）本人のトークンで作る。
+      // 未連携／API 失敗時は null（degrade-safe：DB の仮押さえは残る）。
       let googleEventId: string | null = null;
       let googleEventLink: string | null = null;
-      const cfg = stage.calendarIds.length > 0 ? await googleConfigForEmail(stage.ownerEmail) : null;
-      if (cfg) {
+      if (cfg && stage.calendarIds.length > 0) {
         const targetCal = stage.calendarIds[0] ?? 'primary';
         const ev = await createCalendarEventWithMeet(cfg, {
           organizerCalendar: targetCal,

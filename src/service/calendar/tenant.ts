@@ -86,24 +86,12 @@ export async function googleConfigForUserId(
 }
 
 /**
- * メールアドレスからそのユーザーのカレンダー資格情報を引く。
- * リレー型（RelayLink.stages[].ownerEmail）用：ステージ担当者ごとに本人のカレンダーを見る。
- * 担当者がまだログインしていなければ null（＝ busy 無しで degrade-safe）。
+ * ⚠️ メールアドレスからトークンを引く関数はあえて用意しない。
+ * リクエスト由来の文字列（RelayLink.stages[].ownerEmail など）でトークンを解決すると、
+ * 「他人のメールを書くだけで他人のカレンダーを読み書きできる」経路になる
+ * （2026-08-08 セキュリティレビュー H2 で実際に指摘された）。
+ * カレンダー資格情報は必ず「検証済みの User.id」から引くこと。
  */
-export async function googleConfigForEmail(
-  email: string | null | undefined,
-): Promise<GoogleCalendarConfig | null> {
-  if (!email) return null;
-  try {
-    const user = await getDb().user.findUnique({
-      where: { email: email.trim().toLowerCase() },
-      select: { id: true },
-    });
-    return user ? googleConfigForUserId(user.id) : null;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * 現在ログイン中のユーザーの ID（未ログインなら null）。

@@ -15,7 +15,7 @@
 import NextAuth from 'next-auth';
 import { NextResponse } from 'next/server';
 import { SECURITY_HEADERS } from './src/service/security';
-import { decideGate } from './src/service/auth/gate';
+import { decideGate, sessionStateOf } from './src/service/auth/gate';
 import { authConfig } from './auth.config';
 
 function applySecurityHeaders(res: NextResponse): NextResponse {
@@ -27,31 +27,50 @@ function applySecurityHeaders(res: NextResponse): NextResponse {
 
 const { auth } = NextAuth(authConfig);
 
+function jsonResponse(status: number, code: string, message: string): NextResponse {
+  return applySecurityHeaders(
+    new NextResponse(JSON.stringify({ error: message, code }), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  );
+}
+
 export default auth((req) => {
   const nextUrl = req.nextUrl ?? new URL(req.url);
-  const decision = decideGate(
-    nextUrl.pathname,
-    req.method ?? 'GET',
+
+  // 許可リストは**毎リクエスト**評価する。セッションは長期有効なので、
+  // ALLOWED_EMAILS から外した人を即座に締め出せるようにするため（H3）。
+  const state = sessionStateOf(
+    req.auth?.user?.email,
+    process.env.ALLOWED_EMAILS,
     !!req.auth,
-    nextUrl.search ?? '',
   );
 
-  if (decision.kind === 'unauthorized') {
-    return applySecurityHeaders(
-      new NextResponse(JSON.stringify({ error: 'ログインが必要です', code: 'UNAUTHORIZED' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    );
-  }
+  const decision = decideGate(nextUrl.pathname, req.method ?? 'GET', state, nextUrl.search ?? '');
 
-  if (decision.kind === 'signin') {
-    const url = new URL('/auth/signin', nextUrl.origin);
-    url.searchParams.set('callbackUrl', decision.callbackUrl);
-    return applySecurityHeaders(NextResponse.redirect(url));
-  }
+  switch (decision.kind) {
+    case 'unauthorized':
+      return jsonResponse(401, 'UNAUTHORIZED', 'ログインが必要です');
 
-  return applySecurityHeaders(NextResponse.next());
+    case 'forbidden':
+      return jsonResponse(403, 'FORBIDDEN', 'このアカウントは利用を許可されていません');
+
+    case 'accessDenied': {
+      const url = new URL('/auth/error', nextUrl.origin);
+      url.searchParams.set('error', 'AccessDenied');
+      return applySecurityHeaders(NextResponse.redirect(url));
+    }
+
+    case 'signin': {
+      const url = new URL('/auth/signin', nextUrl.origin);
+      url.searchParams.set('callbackUrl', decision.callbackUrl);
+      return applySecurityHeaders(NextResponse.redirect(url));
+    }
+
+    default:
+      return applySecurityHeaders(NextResponse.next());
+  }
 });
 
 export const config = {

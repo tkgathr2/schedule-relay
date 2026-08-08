@@ -6,6 +6,15 @@
  *     判定だけをここに置けば「どのパスが無認証で通るか」を軽量にテストできる。
  *  2. Edge ランタイムで動くので、Node 依存を一切持ち込まない。
  */
+import { isAllowedEmail } from './allowlist.js';
+
+/**
+ * Auth.js が実際に提供するエンドポイントだけにマッチさせる。
+ * https://authjs.dev/reference/nextjs#custom-pages のルート一覧に対応。
+ * providers 名は callback/<provider> のように後続セグメントを取るので (\/|$) で許す。
+ */
+const AUTHJS_ENDPOINT_RE =
+  /^\/api\/auth\/(signin|signout|callback|session|csrf|providers|error|verify-request|webauthn-options)(\/|$)/;
 
 /**
  * 認証不要で公開してよいパスか判定する（allowlist）。
@@ -23,10 +32,12 @@ export function isPublicPath(pathname: string, method: string): boolean {
   const m = method === 'HEAD' ? 'GET' : method;
 
   // 🔑 ログイン導線そのもの。ここを保護すると「ログインするためにログインが要る」で詰む。
-  //   /api/auth/**  : Auth.js のエンドポイント（signin/callback/session/csrf/signout）
-  //   /auth/**      : 自前のログイン画面・アクセス拒否画面
-  // ※ /api/auth/refresh-keepalive は cron 用で、route 側が CRON_SECRET を検証する。
-  if (pathname === '/api/auth' || pathname.startsWith('/api/auth/')) return true;
+  // ただし /api/auth/** を丸ごと開けると、将来 /api/auth/ 配下に足したルートが
+  // 気づかないうちに無認証で公開される。Auth.js の実エンドポイントだけを明示列挙する。
+  if (AUTHJS_ENDPOINT_RE.test(pathname)) return true;
+  // cron 用。middleware は通すが、route 側が CRON_SECRET（Bearer）を検証する。
+  if (pathname === '/api/auth/refresh-keepalive') return true;
+  //   /auth/** : 自前のログイン画面・アクセス拒否画面
   if (pathname === '/auth' || pathname.startsWith('/auth/')) return true;
 
   // ランディングページ（ダミーデータのみ・実データ無し）
@@ -74,26 +85,60 @@ export function isPublicPath(pathname: string, method: string): boolean {
   return false;
 }
 
+/**
+ * リクエストのセッション状態。
+ *  - anonymous : 未ログイン
+ *  - revoked   : セッションは有効だが、ALLOWED_EMAILS から外されている
+ *  - active    : ログイン済み、かつ現在も許可リストに載っている
+ */
+export type SessionState = 'anonymous' | 'revoked' | 'active';
+
+/**
+ * セッションのメールアドレスを **毎リクエスト** 許可リストと突き合わせて状態を判定する。
+ *
+ * 【なぜ毎回評価するのか（2026-08-08 レビュー H3）】
+ * 許可リストはログイン時（signIn コールバック）にしか評価されない。
+ * セッションは長期間有効なので、ALLOWED_EMAILS から誰かを削除しても
+ * 既発行のセッションはそのまま通り続けてしまい、緊急時の締め出し手段が
+ * AUTH_SECRET ローテーション（＝全員強制ログアウト）しか無くなる。
+ * ここで毎回評価すれば、env を1行直して再デプロイするだけで即座に締め出せる。
+ *
+ * 純関数かつ env 参照だけなので Edge ランタイムでも動く。
+ */
+export function sessionStateOf(
+  email: string | null | undefined,
+  allowedEmails: string | undefined,
+  isAuthenticated: boolean,
+): SessionState {
+  if (!isAuthenticated) return 'anonymous';
+  return isAllowedEmail(email, allowedEmails) ? 'active' : 'revoked';
+}
+
 /** ゲート判定の結果。middleware がこれを NextResponse へ写像する。 */
 export type GateDecision =
   | { kind: 'allow' }
   | { kind: 'unauthorized' }
+  | { kind: 'forbidden' }
+  | { kind: 'accessDenied' }
   | { kind: 'signin'; callbackUrl: string };
 
 /**
  * 「このリクエストを通すか／どう弾くか」を決める。
  *
- * API（/api/**）は 401 JSON を返す（fetch 側でハンドリングできるように）。
- * 画面はログイン画面へリダイレクトし、ログイン後に元の URL へ戻す。
+ * API（/api/**）は 401/403 JSON を返す（fetch 側でハンドリングできるように）。
+ * 画面は、未ログインならログイン画面（ログイン後に元URLへ戻す）、
+ * 許可を外された場合はアクセス拒否画面へ送る
+ * （ログイン画面に送るとログインし直しても弾かれてループするため）。
  */
 export function decideGate(
   pathname: string,
   method: string,
-  isAuthenticated: boolean,
+  state: SessionState,
   search = '',
 ): GateDecision {
   if (isPublicPath(pathname, method)) return { kind: 'allow' };
-  if (isAuthenticated) return { kind: 'allow' };
-  if (pathname.startsWith('/api/')) return { kind: 'unauthorized' };
-  return { kind: 'signin', callbackUrl: `${pathname}${search}` };
+  if (state === 'active') return { kind: 'allow' };
+  const isApi = pathname.startsWith('/api/');
+  if (state === 'revoked') return isApi ? { kind: 'forbidden' } : { kind: 'accessDenied' };
+  return isApi ? { kind: 'unauthorized' } : { kind: 'signin', callbackUrl: `${pathname}${search}` };
 }

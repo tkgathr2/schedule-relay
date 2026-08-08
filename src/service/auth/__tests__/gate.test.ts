@@ -7,7 +7,7 @@
  * （＝「どのパスが無認証で通るか」「未ログインをどう弾くか」の回帰はここで止まる）。
  */
 import { describe, it, expect } from 'vitest';
-import { isPublicPath, decideGate } from '../gate.js';
+import { isPublicPath, decideGate, sessionStateOf } from '../gate.js';
 
 describe('isPublicPath（公開/保護の境界）', () => {
   const PUBLIC: [string, string][] = [
@@ -33,9 +33,11 @@ describe('isPublicPath（公開/保護の境界）', () => {
     ['/auth/signin', 'GET'],
     ['/auth/error', 'GET'],
     ['/api/auth/signin', 'GET'],
+    ['/api/auth/signin/google', 'POST'],
     ['/api/auth/callback/google', 'GET'],
     ['/api/auth/session', 'GET'],
     ['/api/auth/csrf', 'GET'],
+    ['/api/auth/providers', 'GET'],
     ['/api/auth/signout', 'POST'],
     // cron 用。middleware は通すが route 側で CRON_SECRET を検証する。
     ['/api/auth/refresh-keepalive', 'GET'],
@@ -68,6 +70,10 @@ describe('isPublicPath（公開/保護の境界）', () => {
     ['/api/docs', 'GET'],
     ['/api/openapi', 'GET'],
     ['/api/admin/stats', 'GET'],
+    // M1: /api/auth/** を丸ごと開けない。Auth.js の実エンドポイント以外は保護する。
+    ['/api/auth/anything-else', 'GET'],
+    ['/api/auth/admin-backdoor', 'POST'],
+    ['/api/auth', 'GET'],
   ];
 
   it.each(PUBLIC)('公開: %s %s', (path, method) => {
@@ -89,30 +95,58 @@ describe('isPublicPath（公開/保護の境界）', () => {
   });
 });
 
-describe('decideGate（未ログインの弾き方）', () => {
-  it('公開パスはログイン状態に関わらず通す', () => {
-    expect(decideGate('/b/abc123', 'GET', false)).toEqual({ kind: 'allow' });
-    expect(decideGate('/api/health', 'GET', false)).toEqual({ kind: 'allow' });
+describe('sessionStateOf（許可リストの毎リクエスト再評価・H3）', () => {
+  const LIST = 'atsuhiro@takagi.bz';
+
+  it('未ログインは anonymous', () => {
+    expect(sessionStateOf(null, LIST, false)).toBe('anonymous');
+    expect(sessionStateOf('atsuhiro@takagi.bz', LIST, false)).toBe('anonymous');
   });
 
-  it('保護パスもログイン済みなら通す', () => {
-    expect(decideGate('/propose', 'GET', true)).toEqual({ kind: 'allow' });
-    expect(decideGate('/api/google/calendars', 'GET', true)).toEqual({ kind: 'allow' });
+  it('許可リストに載っていれば active', () => {
+    expect(sessionStateOf('atsuhiro@takagi.bz', LIST, true)).toBe('active');
+  });
+
+  it('セッションはあっても許可リストから外れていれば revoked', () => {
+    // ALLOWED_EMAILS から削除した直後、既発行セッションが通り続けないこと
+    expect(sessionStateOf('atsuhiro@takagi.bz', 'someone-else@example.com', true)).toBe('revoked');
+    expect(sessionStateOf('atsuhiro@takagi.bz', undefined, true)).toBe('revoked');
+  });
+});
+
+describe('decideGate（未ログイン・失効の弾き方）', () => {
+  it('公開パスはセッション状態に関わらず通す', () => {
+    expect(decideGate('/b/abc123', 'GET', 'anonymous')).toEqual({ kind: 'allow' });
+    expect(decideGate('/api/health', 'GET', 'anonymous')).toEqual({ kind: 'allow' });
+    expect(decideGate('/b/abc123', 'GET', 'revoked')).toEqual({ kind: 'allow' });
+  });
+
+  it('保護パスも active なら通す', () => {
+    expect(decideGate('/propose', 'GET', 'active')).toEqual({ kind: 'allow' });
+    expect(decideGate('/api/google/calendars', 'GET', 'active')).toEqual({ kind: 'allow' });
   });
 
   it('未ログインの保護 API は 401（JSON で返せるように）', () => {
-    expect(decideGate('/api/google/calendars', 'GET', false)).toEqual({ kind: 'unauthorized' });
-    expect(decideGate('/api/availability/propose', 'POST', false)).toEqual({ kind: 'unauthorized' });
+    expect(decideGate('/api/google/calendars', 'GET', 'anonymous')).toEqual({ kind: 'unauthorized' });
+    expect(decideGate('/api/availability/propose', 'POST', 'anonymous')).toEqual({ kind: 'unauthorized' });
   });
 
   it('未ログインの保護ページはログイン画面へ（元URLを callbackUrl で保持）', () => {
-    expect(decideGate('/propose', 'GET', false)).toEqual({
+    expect(decideGate('/propose', 'GET', 'anonymous')).toEqual({
       kind: 'signin',
       callbackUrl: '/propose',
     });
-    expect(decideGate('/links', 'GET', false, '?tab=all')).toEqual({
+    expect(decideGate('/links', 'GET', 'anonymous', '?tab=all')).toEqual({
       kind: 'signin',
       callbackUrl: '/links?tab=all',
     });
+  });
+
+  it('許可を外されたセッションは API なら 403', () => {
+    expect(decideGate('/api/pages', 'GET', 'revoked')).toEqual({ kind: 'forbidden' });
+  });
+
+  it('許可を外されたセッションは画面ならアクセス拒否画面へ（ログイン画面だとループする）', () => {
+    expect(decideGate('/links', 'GET', 'revoked')).toEqual({ kind: 'accessDenied' });
   });
 });

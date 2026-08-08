@@ -6,7 +6,6 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import '../scheduler.css';
-import { useOrganizerId } from '../_components/use-organizer-id';
 
 const TZ = 'Asia/Tokyo';
 const HOUR_START = 8;
@@ -86,16 +85,14 @@ function fmtWeekRange(weekStartMs: number): string {
 
 // ---- コンポーネント ----
 export default function CalendarPage() {
-  const { organizerId } = useOrganizerId();
   const [pages, setPages] = useState<PageRow[] | null>(null);
   const [busy, setBusy] = useState<BusyDto[]>([]);
   const [loading, setLoading] = useState(false);
   const [viewWeekStart, setViewWeekStart] = useState<number>(() => startOfWeekJst(Date.now()));
 
-  // リンク一覧取得（ログイン中ユーザーのぶんだけ）
+  // リンク一覧取得（主催者はサーバ側でセッションから決まる）
   useEffect(() => {
-    if (!organizerId) return;
-    fetch(`/api/pages?organizerId=${encodeURIComponent(organizerId)}`, { cache: 'no-store' })
+    fetch('/api/pages', { cache: 'no-store' })
       .then((r) => r.json())
       .then((j: { pages: PageRow[] }) => {
         const clean = (j.pages || []).filter((p) => {
@@ -105,7 +102,7 @@ export default function CalendarPage() {
         setPages(clean);
       })
       .catch(() => setPages([]));
-  }, [organizerId]);
+  }, []);
 
   // busyデータ取得（週が変わるたびに再取得）
   useEffect(() => {

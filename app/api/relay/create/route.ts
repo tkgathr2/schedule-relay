@@ -5,12 +5,27 @@
  *   bufferMinutes?, maxGapDays?, startDate?, endDate?
  * }
  * 応答: { slug, id }
+ *
+ * 🔒 主催者専用（middleware で保護）。加えて本ルートで下記を検証する
+ *    （2026-08-08 セキュリティレビュー H2）：
+ *      - stages[].ownerEmail はログイン中本人のメールのみ許可（他人を担当者にできない）
+ *      - calendarIds は本人の calendarList に実在するIDのみ許可
+ *      - 作成者を createdByUserId に記録し、以降のカレンダー資格情報はここからのみ解決する
  */
 import { NextResponse } from 'next/server';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { ServiceError } from '@/service/errors';
 import { jsonError } from '@/service/http';
-import { generateSlug, validateRelayStages, type RelayStageDef } from '@/service/relay-link';
+import {
+  generateSlug,
+  validateRelayStages,
+  validateStagesOwnedBy,
+  validateStageCalendarIds,
+  type RelayStageDef,
+} from '@/service/relay-link';
+import { requireSessionUser } from '@/service/auth/session';
+import { googleConfigForUserId } from '@/service/calendar/tenant';
+import { listGoogleCalendars } from '@/service/calendar/google';
 
 let _client: PrismaClient | undefined;
 function db(): PrismaClient {
@@ -30,6 +45,8 @@ function parseDate(v: unknown): Date | null | undefined {
 
 export async function POST(req: Request): Promise<NextResponse> {
   try {
+    const me = await requireSessionUser();
+
     const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
     if (!body) throw new ServiceError('VALIDATION', 'JSON ボディが必要です');
 
@@ -56,6 +73,31 @@ export async function POST(req: Request): Promise<NextResponse> {
     const stageErr = validateRelayStages(stages);
     if (stageErr) throw new ServiceError('VALIDATION', stageErr);
 
+    // 🔒 担当者は本人のみ。他人のカレンダーを勝手に対象にさせない。
+    const ownerErr = validateStagesOwnedBy(stages, me.email);
+    if (ownerErr) throw new ServiceError('FORBIDDEN', ownerErr);
+
+    // 🔒 calendarIds は本人が実際にアクセスできるカレンダーだけに限定する。
+    // （'primary' 以外を1つでも指定するなら calendarList と突合する）
+    const needsCalendarCheck = stages.some((s) =>
+      s.calendarIds.some((id) => id.trim().toLowerCase() !== 'primary'),
+    );
+    if (needsCalendarCheck) {
+      const cfg = await googleConfigForUserId(me.id);
+      if (!cfg) {
+        throw new ServiceError(
+          'FORBIDDEN',
+          'Googleカレンダーが未連携のため、primary 以外のカレンダーは指定できません',
+        );
+      }
+      const allowed = (await listGoogleCalendars(cfg)).map((c) => c.id);
+      if (allowed.length === 0) {
+        throw new ServiceError('CALENDAR_WRITE_FAILED', 'カレンダー一覧を取得できませんでした');
+      }
+      const calErr = validateStageCalendarIds(stages, allowed);
+      if (calErr) throw new ServiceError('FORBIDDEN', calErr);
+    }
+
     const bufferMinutes =
       typeof body.bufferMinutes === 'number' && Number.isFinite(body.bufferMinutes)
         ? Math.max(0, Math.floor(body.bufferMinutes))
@@ -79,6 +121,8 @@ export async function POST(req: Request): Promise<NextResponse> {
           data: {
             slug,
             title,
+            // カレンダー資格情報の唯一の出どころ。stages[].ownerEmail は信頼しない。
+            createdByUserId: me.id,
             durationMinutes: Math.floor(duration),
             stages: stages as unknown as Prisma.InputJsonValue,
             bufferMinutes,

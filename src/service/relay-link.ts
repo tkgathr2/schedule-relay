@@ -94,9 +94,68 @@ export function validateRelayStages(stages: readonly RelayStageDef[]): string | 
     if (seen.has(s.order)) return `order が重複しています (${s.order})`;
     seen.add(s.order);
     if (typeof s.label !== 'string' || s.label.length === 0) return 'label は必須です';
-    if (typeof s.ownerEmail !== 'string' || !s.ownerEmail.includes('@'))
+    if (typeof s.ownerEmail !== 'string' || !EMAIL_RE.test(s.ownerEmail))
       return `ownerEmail が不正です (${s.ownerEmail})`;
     if (!Array.isArray(s.calendarIds)) return 'calendarIds は配列で指定してください';
+    if (s.calendarIds.length > 50) return 'calendarIds は50件までです';
+  }
+  return null;
+}
+
+/** ざっくりしたメール形式チェック（空白・カンマ・複数@を弾く程度）。 */
+const EMAIL_RE = /^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/;
+
+/** 比較用にメールアドレスを正規化する。 */
+export function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+/**
+ * 全ステージの担当者が「作成者本人」であることを検証する。
+ *
+ * 【なぜ必要か（2026-08-08 レビュー H2）】
+ * ownerEmail は無検証で保存され、その後 /api/relay/{slug}/candidates と
+ * /api/relay/{slug}/book（どちらも**未認証で叩ける公開API**）が使っていた。
+ * 他人のメールを書くだけで、他人のカレンダーの空き状況を読み、
+ * 他人のカレンダーに予定を作り、Meet を発行し、任意の宛先へ招待メールを送れた
+ * ＝ 被害者の Google アカウントを踏み台にしたスパム／フィッシング中継。
+ *
+ * 今フェーズでは「他人を担当者に指定する」機能自体を許可しない
+ * （相手側が自分でログインして同意する双方向フローは次フェーズ）。
+ *
+ * @returns エラーメッセージ（問題なければ null）
+ */
+export function validateStagesOwnedBy(
+  stages: readonly RelayStageDef[],
+  ownerEmail: string | null | undefined,
+): string | null {
+  if (!ownerEmail) return 'ログイン中アカウントのメールアドレスを取得できませんでした';
+  const me = normalizeEmail(ownerEmail);
+  for (const s of stages) {
+    if (normalizeEmail(s.ownerEmail) !== me) {
+      return `現在は自分以外を担当者に指定できません（${s.ownerEmail}）。ステージの担当者は ${ownerEmail} のみ指定できます`;
+    }
+  }
+  return null;
+}
+
+/**
+ * calendarIds が「そのユーザーが実際にアクセスできるカレンダー」だけかを検証する。
+ * 'primary' は常に許可。allowed に無い ID が混ざっていたらエラー。
+ *
+ * @param allowed そのユーザーの calendarList から取得した実在カレンダーID
+ */
+export function validateStageCalendarIds(
+  stages: readonly RelayStageDef[],
+  allowed: readonly string[],
+): string | null {
+  const set = new Set([...allowed.map(normalizeEmail), 'primary']);
+  for (const s of stages) {
+    for (const id of s.calendarIds) {
+      if (!set.has(normalizeEmail(id))) {
+        return `アクセスできないカレンダーIDが指定されています (${id})`;
+      }
+    }
   }
   return null;
 }

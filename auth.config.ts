@@ -19,8 +19,21 @@ import Google from 'next-auth/providers/google';
 import type { NextAuthConfig } from 'next-auth';
 import { isAllowedEmail } from './src/service/auth/allowlist';
 
-/** セッション有効期間：1年（社長指示「1年間は再ログイン不要」）。 */
-export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
+/**
+ * セッション有効期間：30日。ただし **ローリング更新** なので、
+ * 使い続けている限り再ログインは求められない（社長指示「1年間は再ログイン不要」を満たす）。
+ *
+ * 1年固定にしなかった理由（2026-08-08 セキュリティレビュー H3）：
+ * JWT セッションはサーバ側に失効手段が無い。1年固定だと、盗まれたトークンや
+ * 許可リストから外したアカウントのトークンが最長1年間そのまま有効になり、
+ * 緊急時の対処が AUTH_SECRET ローテーション（＝全員強制ログアウト）しか無くなる。
+ * 30日ローリングなら、放置されたトークンは30日で自然に失効する。
+ * あわせて middleware が毎リクエスト許可リストを再評価するので即時締め出しも可能。
+ */
+export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
+
+/** セッションを延長する間隔：1日（アクセスがあれば有効期限を切り直す）。 */
+export const SESSION_UPDATE_AGE_SECONDS = 60 * 60 * 24;
 
 /**
  * 要求する Google OAuth スコープ。
@@ -61,6 +74,7 @@ export const authConfig = {
   session: {
     strategy: 'jwt',
     maxAge: SESSION_MAX_AGE_SECONDS,
+    updateAge: SESSION_UPDATE_AGE_SECONDS,
   },
   pages: {
     signIn: '/auth/signin',
@@ -70,9 +84,14 @@ export const authConfig = {
     /**
      * 認可ゲート：許可リストに無いメールアドレスはログインさせない。
      * false を返すと Auth.js が pages.error へ `?error=AccessDenied` 付きでリダイレクトする。
+     *
+     * email_verified を必須にしているのは、未確認メールを許すと
+     * 「許可リストのアドレスを自称するだけ」でログインできる可能性を残すため。
+     * Google の OIDC は確認済みなら email_verified=true を返す。
      */
-    signIn({ user }) {
-      return isAllowedEmail(user.email, process.env.ALLOWED_EMAILS);
+    signIn({ user, profile }) {
+      if (profile && profile.email_verified !== true) return false;
+      return isAllowedEmail(user.email ?? profile?.email, process.env.ALLOWED_EMAILS);
     },
     /** JWT に user.id（＝ DB の User.id）を載せる。organizerId として全画面で使う。 */
     jwt({ token, user }) {
