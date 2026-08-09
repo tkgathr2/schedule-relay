@@ -143,6 +143,15 @@ describe('T2 確定型フロー', () => {
     // 破棄された Y を確定しようとすると EXPIRED（解放済み）
     await expectCode('EXPIRED', () => confirmHold(repo, holdY.id, 'guest-1', null, NOW + MIN));
   });
+
+  it('Google未連携でもhold/confirmは成立する（degrade-safe・googleEventIdはnullのまま）', async () => {
+    const page = await makePage(repo);
+    const { event } = await createEventForPage(repo, page.slug, 'idem-3');
+    const { hold } = await holdSlot(repo, event.id, SLOT_10, 'guest-1', NOW);
+    expect(hold.googleEventId).toBeNull();
+    const conf = await confirmHold(repo, hold.id, 'guest-1', null, NOW + MIN);
+    expect(conf.start).toBe(SLOT_10.start);
+  });
 });
 
 describe('ダブルブッキング防止（§12）', () => {
@@ -260,6 +269,49 @@ describe('検証エラー（§20）', () => {
     const { event } = await createEventForPage(repo, page.slug, 'e6');
     const { hold } = await holdSlot(repo, event.id, SLOT_10, 'guest-1', NOW);
     await expectCode('FORBIDDEN', () => confirmHold(repo, hold.id, 'attacker', null, NOW + MIN));
+  });
+});
+
+describe('Hold の googleEventId 掃除ロジック（repo層・「[調整中]」仮予定の後始末）', () => {
+  // holdSlot/confirmHold(service層)はGoogle未連携だとgoogleEventIdを紐付けないため、
+  // ここではrepoを直接操作してattachHoldGoogleEventId後の解放/確定で
+  // 対象のgoogleEventIdが正しく呼び出し側に返る（＝カレンダーから削除できる）ことを検証する。
+  let repo: MemoryRepository;
+  beforeEach(() => {
+    repo = new MemoryRepository();
+  });
+
+  it('TTL失効したHoldのgoogleEventIdが、次の同一resourceIdへのholdで掃除対象として返る', async () => {
+    const page = await makePage(repo);
+    const { event } = await createEventForPage(repo, page.slug, 'gc-1');
+    const { hold: expired } = await holdSlot(repo, event.id, SLOT_10, 'guest-1', NOW);
+    await repo.attachHoldGoogleEventId(expired.id, 'gcal-evt-expired');
+
+    // TTL(既定15分)を過ぎてから、同一resourceId(=organizerId)への別枠のholdを作る
+    const { event: event2 } = await createEventForPage(repo, page.slug, 'gc-2');
+    const result = await repo.createActiveHold({
+      eventId: event2.id,
+      candidateId: (await repo.upsertCandidate(event2.id, SLOT_11)).id,
+      resourceId: page.organizerId,
+      holderId: 'guest-2',
+      slot: SLOT_11,
+      expiresAt: NOW + 16 * MIN + 15 * MIN,
+      now: NOW + 16 * MIN, // expired の expiresAt(NOW+15min) を過ぎている
+    });
+    expect(result.releasedExpiredGoogleEventIds).toEqual(['gcal-evt-expired']);
+  });
+
+  it('確定すると、確定Hold自身と破棄された他候補のgoogleEventIdが両方返る', async () => {
+    const page = await makePage(repo);
+    const { event } = await createEventForPage(repo, page.slug, 'gc-3');
+    const { hold: holdX } = await holdSlot(repo, event.id, SLOT_10, 'guest-1', NOW);
+    const { hold: holdY } = await holdSlot(repo, event.id, SLOT_11, 'guest-1', NOW);
+    await repo.attachHoldGoogleEventId(holdX.id, 'gcal-evt-x');
+    await repo.attachHoldGoogleEventId(holdY.id, 'gcal-evt-y');
+
+    const result = await repo.confirmHold(holdX.id, { participantId: 'guest-1', now: NOW + MIN });
+    expect(result?.confirmedHoldGoogleEventId).toBe('gcal-evt-x');
+    expect(result?.releasedGoogleEventIds).toEqual(['gcal-evt-y']);
   });
 });
 

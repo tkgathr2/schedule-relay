@@ -8,9 +8,11 @@ import type {
   BookingPageRec,
   CandidateRec,
   ConfirmationRec,
+  ConfirmHoldResult,
   ConfirmInput,
   CreateEventInput,
   CreateHoldInput,
+  CreateHoldResult,
   CreatePageInput,
   CreateRelayStepInput,
   EventRec,
@@ -97,6 +99,7 @@ function toHoldRec(h: {
   status: string;
   expiresAt: Date;
   createdAt: Date;
+  googleEventId: string | null;
 }): HoldRec {
   return {
     id: h.id,
@@ -109,6 +112,7 @@ function toHoldRec(h: {
     status: h.status as HoldRec['status'],
     expiresAt: toMs(h.expiresAt),
     createdAt: toMs(h.createdAt),
+    googleEventId: h.googleEventId,
   };
 }
 
@@ -236,12 +240,20 @@ export class PrismaRepository implements Repository {
     return toCandidateRec(c);
   }
 
-  async createActiveHold(input: CreateHoldInput): Promise<HoldRec> {
+  async createActiveHold(input: CreateHoldInput): Promise<CreateHoldResult> {
     try {
       // 遅延スイープ → Hold作成 → Event status='holding' を1トランザクションで原子的に行う
       // （types.ts の「トランザクション＋EXCLUDE で原子性を保証」要件・memory版と同じ振る舞い）。
-      const h = await this.db.$transaction(async (tx) => {
-        // ① 期限切れ active を先に released へ落とす（遅延スイープ・期限切れが枠を永久ブロックしない）
+      const { created, releasedExpiredGoogleEventIds } = await this.db.$transaction(async (tx) => {
+        // ① 期限切れ active を先に released へ落とす前に、掃除対象（主催者カレンダーの仮予定）を集める。
+        const expired = await tx.hold.findMany({
+          where: {
+            resourceId: input.resourceId,
+            status: 'active',
+            expiresAt: { lte: toDate(input.now) },
+          },
+          select: { googleEventId: true },
+        });
         await tx.hold.updateMany({
           where: {
             resourceId: input.resourceId,
@@ -271,9 +283,14 @@ export class PrismaRepository implements Repository {
           data: { status: 'holding' },
         });
 
-        return created;
+        return {
+          created,
+          releasedExpiredGoogleEventIds: expired
+            .map((e) => e.googleEventId)
+            .filter((id): id is string => !!id),
+        };
       });
-      return toHoldRec(h);
+      return { hold: toHoldRec(created), releasedExpiredGoogleEventIds };
     } catch (e) {
       // EXCLUDE 制約違反だけを CONFLICT_HOLD に翻訳する（PG code 23P01 / 制約名で判定）。
       // FK 違反・接続エラー等の無関係な失敗を 409 で握り潰さない。
@@ -294,16 +311,20 @@ export class PrismaRepository implements Repository {
     await this.db.hold.update({ where: { id }, data: { status: 'released' } });
   }
 
+  async attachHoldGoogleEventId(holdId: string, googleEventId: string): Promise<void> {
+    await this.db.hold.update({ where: { id: holdId }, data: { googleEventId } });
+  }
+
   async confirmHold(
     holdId: string,
     input: ConfirmInput,
-  ): Promise<ConfirmationRec | null> {
+  ): Promise<ConfirmHoldResult | null> {
     return this.db.$transaction(async (tx) => {
       const hold = await tx.hold.findUnique({ where: { id: holdId } });
       if (!hold) return null;
 
       // 冪等再送：既に confirmed なら既存 Confirmation を返す
-      // （memory.ts と同じく eventId・start・end・participantId で一致判定）。
+      // （memory.ts と同じく eventId・start・end・participantId で一致判定。掃除対象は既に処理済みのため空）。
       if (hold.status === 'confirmed') {
         const existing = await tx.confirmation.findFirst({
           where: {
@@ -313,7 +334,9 @@ export class PrismaRepository implements Repository {
             endAt: hold.endAt,
           },
         });
-        return existing ? toConfirmationRec(existing) : null;
+        return existing
+          ? { confirmation: toConfirmationRec(existing), confirmedHoldGoogleEventId: null, releasedGoogleEventIds: [] }
+          : null;
       }
 
       // active かつ未失効であること
@@ -330,6 +353,11 @@ export class PrismaRepository implements Repository {
       });
 
       // 同一イベントの他の active Hold は解放（T2：確定で他候補は破棄・§22・memory.ts:181-185）。
+      // 解放前に掃除対象（主催者カレンダーの仮予定）を集めておく。
+      const released = await tx.hold.findMany({
+        where: { eventId: hold.eventId, id: { not: holdId }, status: 'active' },
+        select: { googleEventId: true },
+      });
       await tx.hold.updateMany({
         where: { eventId: hold.eventId, id: { not: holdId }, status: 'active' },
         data: { status: 'released' },
@@ -345,7 +373,11 @@ export class PrismaRepository implements Repository {
           formAnswers: (input.formAnswers as Prisma.InputJsonValue) ?? Prisma.JsonNull,
         },
       });
-      return toConfirmationRec(conf);
+      return {
+        confirmation: toConfirmationRec(conf),
+        confirmedHoldGoogleEventId: hold.googleEventId,
+        releasedGoogleEventIds: released.map((r) => r.googleEventId).filter((id): id is string => !!id),
+      };
     });
   }
 
