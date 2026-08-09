@@ -8,7 +8,8 @@ import { getRepository } from '@/repo/index';
 import { createEventForPage } from '@/service/booking';
 import { ServiceError } from '@/service/errors';
 import { jsonError } from '@/service/http';
-import type { EventStatus } from '@/repo/types';
+import { requireSessionUserId } from '@/service/auth/session';
+import type { BookingPageRec, EventStatus } from '@/repo/types';
 
 const VALID_STATUSES: EventStatus[] = [
   'draft',
@@ -39,20 +40,24 @@ export async function GET(req: Request): Promise<NextResponse> {
       // 既定＝未確定の調整（open/holding）
       statuses = ['open', 'holding'];
     }
+    // 対象は**ログイン中ユーザーが主催者のイベントのみ**（H1と同種のテナント横断漏れ防止）。
+    const organizerId = await requireSessionUserId();
     const repo = getRepository();
     const events = await repo.listEventsByStatus(statuses);
     // 関連 BookingPage を join（settings.title・duration_minutes 取り出し用）
-    const pageMap = new Map<string, unknown>();
+    const pageMap = new Map<string, BookingPageRec>();
     for (const e of events) {
       if (!pageMap.has(e.pageId)) {
         const page = await repo.getPageById(e.pageId);
         if (page) pageMap.set(e.pageId, page);
       }
     }
-    const enriched = events.map((e) => ({
-      ...e,
-      page: pageMap.get(e.pageId) ?? null,
-    }));
+    const enriched = events
+      .filter((e) => pageMap.get(e.pageId)?.organizerId === organizerId)
+      .map((e) => ({
+        ...e,
+        page: pageMap.get(e.pageId) ?? null,
+      }));
     return NextResponse.json({ events: enriched });
   } catch (e) {
     return jsonError(e);

@@ -40,6 +40,19 @@ function defaultWeeklyHours(): Record<DayKey, DayHours> {
     sun: { enabled: false, start: '09:00', end: '18:00' },
   };
 }
+// localStorage 復元用。保存形式の変化・手動破損・別バージョンのタブでの書き込み等で
+// 形が崩れていた場合にクラッシュせず安全にデフォルト値へフォールバックするための検証。
+function isValidDayHours(v: unknown): v is DayHours {
+  if (!v || typeof v !== 'object') return false;
+  const d = v as Record<string, unknown>;
+  return (
+    typeof d.enabled === 'boolean' &&
+    typeof d.start === 'string' &&
+    /^\d{2}:\d{2}$/.test(d.start) &&
+    typeof d.end === 'string' &&
+    /^\d{2}:\d{2}$/.test(d.end)
+  );
+}
 
 const TZ = 'Asia/Tokyo';
 const HOUR_START = 8; // 表示開始
@@ -208,7 +221,7 @@ export default function ProposePage() {
   // 指定日(YYYY-MM-DD)の曜日の営業時間を返す。休みの日は null。
   const hoursForYmd = useCallback(
     (ymd: string): { start: string; end: string } | null => {
-      const dow = new Date(`${ymd}T00:00:00+09:00`).getUTCDay();
+      const dow = new Date(`${ymd}T00:00:00Z`).getUTCDay();
       const key = WEEKDAY_TO_KEY[dow]!;
       const h = weeklyHours[key];
       return h.enabled ? { start: h.start, end: h.end } : null;
@@ -260,7 +273,20 @@ export default function ProposePage() {
         };
         if (s.adjType === 'T2' || s.adjType === 'T3') setAdjType(s.adjType);
         if (typeof s.duration === 'number') setDuration(s.duration);
-        if (s.weeklyHours) setWeeklyHours(s.weeklyHours);
+        if (s.weeklyHours && typeof s.weeklyHours === 'object') {
+          const merged = defaultWeeklyHours();
+          let hadInvalidKey = false;
+          for (const k of DAY_KEYS) {
+            const v = (s.weeklyHours as Record<string, unknown>)[k];
+            if (v === undefined) continue;
+            if (isValidDayHours(v)) merged[k] = v;
+            else hadInvalidKey = true;
+          }
+          setWeeklyHours(merged);
+          // 壊れたキーが1つでもあれば、破損データを持ち越さず保存をクリアする
+          // （リロードのたびに同じ破損値が復元されるのを防ぐ）。
+          if (hadInvalidKey) localStorage.removeItem(SAVED_SETTINGS_KEY);
+        }
         if (typeof s.bufBefore === 'number') setBufBefore(s.bufBefore);
         if (typeof s.bufAfter === 'number') setBufAfter(s.bufAfter);
         if (typeof s.minNotice === 'number') setMinNotice(s.minNotice);
