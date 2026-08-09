@@ -26,6 +26,7 @@ describe('isPublicPath（公開/保護の境界）', () => {
     ['/api/pages/abc123/availability', 'GET'],
     ['/api/events', 'POST'],
     ['/api/events/evt_1/holds', 'POST'],
+    ['/api/events/evt_1/holds/hold_1', 'DELETE'],
     ['/api/events/evt_1/confirm', 'POST'],
     ['/api/events/evt_1/relay', 'GET'],
     ['/api/events/evt_1/relay/advance', 'POST'],

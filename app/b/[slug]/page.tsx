@@ -64,11 +64,18 @@ export default function BookingPage({ params }: { params: Promise<{ slug: string
   const [email, setEmail] = useState('');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
+  const [holding, setHolding] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [done, setDone] = useState<{ slot: Slot; meetUrl?: string | null; calendarEventLink?: string | null } | null>(null);
 
+  // 枠をクリックした時点で仮押さえ(hold)を作る（相手の入力が終わるまで確定させない）。
+  // 匿名の相手を識別するためのセッションキー（メール入力前でも hold の holderId に使える）。
+  const [sessionKey] = useState(() => `anon-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`);
+  const [eventId, setEventId] = useState<string | null>(null);
+  const [heldHoldId, setHeldHoldId] = useState<string | null>(null);
+
   const emailValid = /.+@.+/.test(email.trim());
-  const canSubmit = !!picked && name.trim().length > 0 && emailValid;
+  const canSubmit = !!picked && !!heldHoldId && name.trim().length > 0 && emailValid;
 
   const [jumped, setJumped] = useState(false);
 
@@ -118,13 +125,15 @@ export default function BookingPage({ params }: { params: Promise<{ slug: string
     return () => { clearInterval(id); document.removeEventListener('visibilitychange', tick); };
   }, [refresh, notFound, done]);
 
-  // 選択中の枠が更新で消えた＝他の人に取られた → 選択解除して知らせる
+  // 選択中の枠が更新で消えた＝他の人に取られた → 選択解除して知らせる。
+  // ただし自分がhold中の枠は、仮押さえ自体によってavailability APIから除外される
+  // （二重提示防止の仕様）ため、heldHoldIdがある間はこの誤検知チェックをスキップする。
   useEffect(() => {
-    if (picked && !slots.some((s) => s.start === picked.start && s.end === picked.end)) {
+    if (picked && !heldHoldId && !slots.some((s) => s.start === picked.start && s.end === picked.end)) {
       setPicked(null);
       setErr('選択していた枠は、ちょうど他の方が予約しました。空いている別の枠をお選びください。');
     }
-  }, [slots, picked]);
+  }, [slots, picked, heldHoldId]);
 
   const days = useMemo(() => weekDays(week), [week]);
   const slotsByDay = useMemo(() => {
@@ -139,36 +148,66 @@ export default function BookingPage({ params }: { params: Promise<{ slug: string
   const durMin = meta?.durationMin ?? 30;
   const weekHasSlots = days.some((d) => (slotsByDay[d.key] || []).length > 0);
 
-  async function confirm() {
-    if (!picked || !name.trim()) return;
-    if (!emailValid) { setErr('メールアドレスの形式が正しくありません'); return; }
-    setBusy(true); setErr(null);
+  // 枠をクリックした瞬間に仮押さえ(hold)する。主催者のカレンダーには即座に「[調整中]」として
+  // 表示され、/unconfirmed（未確定の調整）にも「相手が今まさに検討中」として出るようになる。
+  // 別の枠に選び直した場合は、直前のholdを解放してから新しいholdを作る。
+  async function selectSlot(s: Slot) {
+    if (holding || busy) return;
+    setErr(null);
+    setHolding(true);
     try {
-      const idem = `${slug}-${email}-${picked.start}`;
-      const evRes = await fetch('/api/events', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'Idempotency-Key': idem },
-        body: JSON.stringify({ slug }),
-      });
-      const ev = await evRes.json();
-      if (!evRes.ok) throw new Error(ev?.error?.message || 'エラー');
-      const eventId = ev.event.id;
+      let evId = eventId;
+      if (!evId) {
+        const evRes = await fetch('/api/events', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'Idempotency-Key': `${slug}-${sessionKey}` },
+          body: JSON.stringify({ slug }),
+        });
+        const ev = await evRes.json();
+        if (!evRes.ok) throw new Error(ev?.error?.message || 'エラー');
+        evId = ev.event.id;
+        setEventId(evId);
+      }
 
-      const hRes = await fetch(`/api/events/${eventId}/holds`, {
+      if (heldHoldId) {
+        // 解放はベストエフォート（失敗してもTTLで自然に失効するので確定処理は継続する）。
+        fetch(`/api/events/${evId}/holds/${heldHoldId}`, {
+          method: 'DELETE',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ holderId: sessionKey }),
+        }).catch(() => {});
+      }
+
+      const hRes = await fetch(`/api/events/${evId}/holds`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ slot: picked, holderId: email.trim() }),
+        body: JSON.stringify({ slot: s, holderId: sessionKey }),
       });
       const h = await hRes.json();
       if (!hRes.ok) {
         if (h?.error?.code === 'CONFLICT_HOLD') throw new Error('申し訳ありません、この枠は今ちょうど埋まりました。別の枠をお選びください。');
         throw new Error(h?.error?.message || 'エラー');
       }
+      setHeldHoldId(h.hold.id);
+      setPicked(s);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'エラーが発生しました');
+      setHeldHoldId(null);
+      load();
+    } finally {
+      setHolding(false);
+    }
+  }
 
+  async function confirm() {
+    if (!picked || !heldHoldId || !name.trim()) return;
+    if (!emailValid) { setErr('メールアドレスの形式が正しくありません'); return; }
+    setBusy(true); setErr(null);
+    try {
       const cRes = await fetch(`/api/events/${eventId}/confirm`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          holdId: h.hold.id,
-          participantId: email.trim(),
+          holdId: heldHoldId,
+          participantId: sessionKey,
           formAnswers: { name: name.trim(), email: email.trim(), note: note.trim() },
         }),
       });
@@ -177,9 +216,10 @@ export default function BookingPage({ params }: { params: Promise<{ slug: string
       setDone({ slot: picked, meetUrl: c.meetUrl ?? null, calendarEventLink: c.calendarEventLink ?? null });
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'エラーが発生しました');
-      // 衝突時は最新の空き状況を取り直す
+      // 衝突時（TTL失効等）は最新の空き状況を取り直し、選択状態をリセットする
       load();
       setPicked(null);
+      setHeldHoldId(null);
     } finally {
       setBusy(false);
     }
@@ -272,7 +312,7 @@ export default function BookingPage({ params }: { params: Promise<{ slug: string
                           const sel = picked?.start === s.start;
                           return (
                             <button key={s.start} className={`sc-slot ${sel ? 'sel' : ''}`}
-                              style={{ top, height: ht }} onClick={() => { setPicked(s); setErr(null); }}>
+                              style={{ top, height: ht }} disabled={holding} onClick={() => selectSlot(s)}>
                               {fmtTime(s.start)}
                             </button>
                           );
@@ -296,6 +336,13 @@ export default function BookingPage({ params }: { params: Promise<{ slug: string
                   <div className="sc-chosen">
                     <strong>{fmtDate(picked.start)}</strong><br />{fmtTime(picked.start)}〜{fmtTime(picked.end)}（{durMin}分）
                   </div>
+                  {heldHoldId ? (
+                    <div className="sc-help" style={{ color: '#0ca678', marginTop: 4 }}>
+                      この枠を仮押さえ中です。下のフォームを送信すると確定します。
+                    </div>
+                  ) : (
+                    <div className="sc-help" style={{ marginTop: 4 }}>仮押さえ中…</div>
+                  )}
                   <div className="sc-field">
                     <label>お名前<span className="req">*</span></label>
                     <input className="sc-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="山田 太郎" />

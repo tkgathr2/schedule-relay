@@ -256,6 +256,30 @@ export async function holdSlot(
 }
 
 /**
+ * 相手が別の枠を選び直した／選択を取り消したときに、直前の仮押さえを明示的に解放する。
+ * holderId が一致しない解放要求は無視する（他人のholdを勝手に解放させない）。
+ * 対応する「[調整中]」仮予定があればカレンダーからも削除する（degrade-safe）。
+ */
+export async function releaseHeldSlot(repo: Repository, holdId: string, holderId: string): Promise<void> {
+  const hold = await repo.getHold(holdId);
+  if (!hold) return;
+  if (hold.holderId !== holderId) throw new ServiceError('FORBIDDEN', 'この仮押さえを解放する権限がありません');
+  if (hold.status !== 'active') return; // 既に確定/解放済みなら何もしない
+
+  await repo.releaseHold(holdId);
+
+  if (!hold.googleEventId) return;
+  try {
+    const ev = await repo.getEvent(hold.eventId);
+    const page = ev ? await repo.getPageById(ev.pageId) : null;
+    const gcfg = page ? await googleConfigForUserId(page.organizerId) : null;
+    if (gcfg) await deleteCalendarEvent(gcfg, hold.googleEventId);
+  } catch {
+    /* degrade-safe */
+  }
+}
+
+/**
  * 確定（§14 POST /events/{id}/confirm）。holderId と participantId 一致を要求。
  * 確定済みHold自身・破棄された他候補の「[調整中]」仮予定はここで掃除する
  * （正式な確定予定の作成は呼び出し元 /api/events/{id}/confirm が別途行う）。
