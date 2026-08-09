@@ -101,6 +101,9 @@ model Hold {
   status      HoldStatus @default(active)
   expiresAt   DateTime // TTL（既定15分）
   createdAt   DateTime   @default(now())
+  // 仮押さえ中、主催者のGoogleカレンダーに作成する「[調整中]」予定のイベントID（primaryカレンダー固定）。
+  // 未連携・API失敗時はnullのまま（degrade-safe）。解放/確定時にこのIDで削除する。
+  googleEventId String?
 
   // ★ ダブルブッキング物理防止は migration.sql の EXCLUDE 制約で担保：
   //   EXCLUDE USING gist (resource_id WITH =, tstzrange(start_at, end_at) WITH &&)

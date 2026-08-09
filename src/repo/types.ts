@@ -58,6 +58,24 @@ export interface HoldRec {
   status: HoldStatus;
   expiresAt: EpochMs;
   createdAt: EpochMs;
+  /** 仮押さえ中に主催者カレンダーへ作成した「[調整中]」予定のイベントID。未連携/未作成ならnull。 */
+  googleEventId: string | null;
+}
+
+/** createActiveHold の戻り値。遅延スイープで一緒に解放された期限切れHoldのGoogleイベントIDも返す（掃除用）。 */
+export interface CreateHoldResult {
+  hold: HoldRec;
+  /** 同一resourceIdで期限切れのため released になった他Holdの googleEventId（掃除対象）。 */
+  releasedExpiredGoogleEventIds: string[];
+}
+
+/** confirmHold の戻り値。確定Hold自身・破棄された他候補Holdの googleEventId を掃除用に返す。 */
+export interface ConfirmHoldResult {
+  confirmation: ConfirmationRec;
+  /** 確定した Hold 自身の googleEventId（正式予定作成後に削除する）。 */
+  confirmedHoldGoogleEventId: string | null;
+  /** 確定により破棄された他 active Hold の googleEventId（掃除対象）。 */
+  releasedGoogleEventIds: string[];
 }
 
 export interface ConfirmationRec {
@@ -130,18 +148,20 @@ export interface Repository {
    * 同一 resourceId に半開区間が重なる active Hold が既にあれば ConflictHoldError を投げる
    * （= EXCLUDE 制約と同じ物理防止）。
    */
-  createActiveHold(input: CreateHoldInput): Promise<HoldRec>;
+  createActiveHold(input: CreateHoldInput): Promise<CreateHoldResult>;
   getHold(id: string): Promise<HoldRec | null>;
   releaseHold(id: string): Promise<void>;
+  /** Hold に主催者カレンダー上の仮予定イベントIDを紐付ける（Google作成成功後に呼ぶ）。 */
+  attachHoldGoogleEventId(holdId: string, googleEventId: string): Promise<void>;
 
   /**
    * Hold を確定する（原子的）。
    *  - Hold が active かつ未失効（expiresAt > now）であること。失効なら null を返す。
    *  - holderId と confirm の participantId 不一致は呼び出し側で検証済み前提。
    *  - 成功時：Hold→confirmed、Event→confirmed、Confirmation を作成して返す。
-   *  - 既に confirmed の Hold を再確定（冪等再送）した場合は既存の Confirmation を返す。
+   *  - 既に confirmed の Hold を再確定（冪等再送）した場合は既存の Confirmation を返す（掃除用IDはnull/空）。
    */
-  confirmHold(holdId: string, input: ConfirmInput): Promise<ConfirmationRec | null>;
+  confirmHold(holdId: string, input: ConfirmInput): Promise<ConfirmHoldResult | null>;
 
   /** デバッグ/テスト用：イベントの確定一覧。 */
   listConfirmations(eventId: string): Promise<ConfirmationRec[]>;

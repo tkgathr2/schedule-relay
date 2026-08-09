@@ -49,7 +49,7 @@ async function setup() {
   // confirmed イベントに Hold→Confirm
   const now = Date.now();
   const cand = await repo.upsertCandidate(evConf.id, { start: now + HOUR, end: now + 2 * HOUR });
-  const hold = await repo.createActiveHold({
+  const { hold } = await repo.createActiveHold({
     eventId: evConf.id,
     candidateId: cand.id,
     resourceId: 'takagi',

@@ -103,6 +103,62 @@ export async function createCalendarEventWithMeet(
 }
 
 /**
+ * 仮押さえ（Hold）中、主催者カレンダーに一時的な「[調整中]」予定を作る。
+ * 確定前の段階なので Meet URL は発行せず・相手にも通知しない（sendUpdates:'none'）。
+ * 失敗時は null を返す（degrade-safe：Google未連携でも仮押さえ自体は成立する）。
+ */
+export interface CreateHoldPlaceholderInput {
+  summary: string;
+  description?: string;
+  startMs: number;
+  endMs: number;
+}
+
+export async function createHoldPlaceholderEvent(
+  cfg: GoogleCalendarConfig,
+  input: CreateHoldPlaceholderInput,
+): Promise<string | null> {
+  try {
+    const oauth2 = new google.auth.OAuth2(cfg.clientId, cfg.clientSecret);
+    oauth2.setCredentials({ refresh_token: cfg.refreshToken });
+    const cal = google.calendar({ version: 'v3', auth: oauth2 });
+    const res = await cal.events.insert({
+      calendarId: 'primary',
+      sendUpdates: 'none',
+      requestBody: {
+        summary: input.summary,
+        description: input.description,
+        start: { dateTime: new Date(input.startMs).toISOString() },
+        end: { dateTime: new Date(input.endMs).toISOString() },
+      },
+    });
+    return res.data.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 上記の仮予定、または確定予定を削除する（Hold失効・他候補破棄・確定後の仮予定掃除に使う）。
+ * 失敗時は false（degrade-safe：削除できなくても呼び出し側の主処理は継続する）。
+ */
+export async function deleteCalendarEvent(
+  cfg: GoogleCalendarConfig,
+  eventId: string,
+  calendarId = 'primary',
+): Promise<boolean> {
+  try {
+    const oauth2 = new google.auth.OAuth2(cfg.clientId, cfg.clientSecret);
+    oauth2.setCredentials({ refresh_token: cfg.refreshToken });
+    const cal = google.calendar({ version: 'v3', auth: oauth2 });
+    await cal.events.delete({ calendarId, eventId, sendUpdates: 'none' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * カレンダー一覧（複数選択UI用）。失敗時は [] （degrade-safe）。
  * 「候補を自動抽出」UIで主催者の全カレンダーを名前付きで提示するために使う。
  */

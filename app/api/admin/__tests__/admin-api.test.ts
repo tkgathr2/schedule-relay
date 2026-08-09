@@ -46,7 +46,7 @@ async function seed() {
   const base = Date.now() + seedCounter * 365 * 24 * HOUR;
   const slot = { start: base + HOUR, end: base + 2 * HOUR };
   const cand = await repo.upsertCandidate(event.id, slot);
-  const hold = await repo.createActiveHold({
+  const { hold } = await repo.createActiveHold({
     eventId: event.id,
     candidateId: cand.id,
     resourceId: `res-${tag}`,

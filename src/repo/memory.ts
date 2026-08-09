@@ -11,8 +11,10 @@ import type {
   CandidateRec,
   ConfirmInput,
   ConfirmationRec,
+  ConfirmHoldResult,
   CreateEventInput,
   CreateHoldInput,
+  CreateHoldResult,
   CreatePageInput,
   CreateRelayStepInput,
   EventRec,
@@ -104,10 +106,15 @@ export class MemoryRepository implements Repository {
     return rec;
   }
 
-  async createActiveHold(input: CreateHoldInput): Promise<HoldRec> {
+  async createActiveHold(input: CreateHoldInput): Promise<CreateHoldResult> {
     // ① 遅延スイープ：TTL 失効した active を released へ落とす（期限切れが枠を永久ブロックしない）。
+    //    掃除対象（主催者カレンダーの仮予定）を呼び出し側に返すため、先に googleEventId を集める。
+    const releasedExpiredGoogleEventIds: string[] = [];
     for (const h of this.holds.values()) {
-      if (h.status === 'active' && h.expiresAt <= input.now) h.status = 'released';
+      if (h.status === 'active' && h.expiresAt <= input.now) {
+        h.status = 'released';
+        if (h.googleEventId) releasedExpiredGoogleEventIds.push(h.googleEventId);
+      }
     }
     // ② EXCLUDE 制約の再現（migration.sql と同一述語）：
     //    同一 resourceId で「未失効の active」または「confirmed（実予約）」が半開区間で重なれば衝突。
@@ -133,11 +140,12 @@ export class MemoryRepository implements Repository {
       status: 'active',
       expiresAt: input.expiresAt,
       createdAt: this.now(),
+      googleEventId: null,
     };
     this.holds.set(rec.id, rec);
     const ev = this.events.get(input.eventId);
     if (ev && ev.status === 'open') ev.status = 'holding';
-    return rec;
+    return { hold: rec, releasedExpiredGoogleEventIds };
   }
 
   async getHold(id: string): Promise<HoldRec | null> {
@@ -149,11 +157,16 @@ export class MemoryRepository implements Repository {
     if (h && h.status === 'active') h.status = 'released';
   }
 
-  async confirmHold(holdId: string, input: ConfirmInput): Promise<ConfirmationRec | null> {
+  async attachHoldGoogleEventId(holdId: string, googleEventId: string): Promise<void> {
+    const h = this.holds.get(holdId);
+    if (h) h.googleEventId = googleEventId;
+  }
+
+  async confirmHold(holdId: string, input: ConfirmInput): Promise<ConfirmHoldResult | null> {
     const hold = this.holds.get(holdId);
     if (!hold) return null;
 
-    // 冪等再送：既に confirmed なら既存の Confirmation を返す。
+    // 冪等再送：既に confirmed なら既存の Confirmation を返す（掃除対象は既に処理済みのため空）。
     if (hold.status === 'confirmed') {
       for (const c of this.confirmations.values()) {
         if (
@@ -162,7 +175,7 @@ export class MemoryRepository implements Repository {
           c.end === hold.end &&
           c.participantId === input.participantId
         ) {
-          return c;
+          return { confirmation: c, confirmedHoldGoogleEventId: null, releasedGoogleEventIds: [] };
         }
       }
       return null;
@@ -171,6 +184,7 @@ export class MemoryRepository implements Repository {
     if (hold.status !== 'active') return null; // released 等
     if (hold.expiresAt <= input.now) return null; // 失効 → サービス層が EXPIRED に翻訳
 
+    const confirmedHoldGoogleEventId = hold.googleEventId;
     hold.status = 'confirmed';
     const conf: ConfirmationRec = {
       id: this.id('conf'),
@@ -186,12 +200,14 @@ export class MemoryRepository implements Repository {
     const ev = this.events.get(hold.eventId);
     if (ev) ev.status = 'confirmed';
     // 同一イベントの他の active Hold は解放（T2：確定で他候補は破棄・§22）。
+    const releasedGoogleEventIds: string[] = [];
     for (const h of this.holds.values()) {
       if (h.eventId === hold.eventId && h.id !== hold.id && h.status === 'active') {
         h.status = 'released';
+        if (h.googleEventId) releasedGoogleEventIds.push(h.googleEventId);
       }
     }
-    return conf;
+    return { confirmation: conf, confirmedHoldGoogleEventId, releasedGoogleEventIds };
   }
 
   async listConfirmations(eventId: string): Promise<ConfirmationRec[]> {

@@ -15,6 +15,8 @@ import { expandWorkingWindows, type WorkingHours } from '../domain/working-hours
 import type { BookingPageRec, ConfirmationRec, EventRec, HoldRec, Repository } from '../repo/types.js';
 import { ConflictHoldError } from '../repo/types.js';
 import { ServiceError } from './errors.js';
+import { googleConfigForUserId } from './calendar/tenant.js';
+import { createHoldPlaceholderEvent, deleteCalendarEvent } from './calendar/google.js';
 
 /** §10 settings の解決済み形。未指定は既定で補完。 */
 export interface ResolvedSettings {
@@ -178,7 +180,19 @@ export interface HoldResult {
   expiresAt: number;
 }
 
-/** 枠を Hold（§14 POST /events/{id}/holds）。resourceId は主催者枠（1:1）。 */
+/** settings.title を読む（未設定なら既定文言）。確定時の予定名にも使う共通ヘルパー。 */
+function pageTitle(page: BookingPageRec): string {
+  const s = page.settings as { title?: unknown } | null;
+  return s && typeof s.title === 'string' && s.title ? s.title : 'ご面談';
+}
+
+/**
+ * 枠を Hold（§14 POST /events/{id}/holds）。resourceId は主催者枠（1:1）。
+ *
+ * 相手が仮押さえした瞬間、主催者の Google カレンダーにも「[調整中]」という一時的な予定を
+ * 作る（社長要望：Spir同様、仮押さえ中の枠も自分のカレンダー上で見えるようにしたい）。
+ * カレンダー連携が失敗・未連携でも Hold 自体は成立させる（degrade-safe）。
+ */
 export async function holdSlot(
   repo: Repository,
   eventId: string,
@@ -197,8 +211,10 @@ export async function holdSlot(
   const candidate = await repo.upsertCandidate(eventId, slot);
   const expiresAt = now + cfg.holdTtlMin * MINUTE_MS;
 
+  let hold: HoldRec;
+  let releasedExpiredGoogleEventIds: string[];
   try {
-    const hold = await repo.createActiveHold({
+    const result = await repo.createActiveHold({
       eventId,
       candidateId: candidate.id,
       resourceId: page.organizerId, // 主催者カレンダー＝共有リソース（§12）
@@ -207,16 +223,43 @@ export async function holdSlot(
       expiresAt,
       now,
     });
-    return { hold, expiresAt };
+    hold = result.hold;
+    releasedExpiredGoogleEventIds = result.releasedExpiredGoogleEventIds;
   } catch (e) {
     if (e instanceof ConflictHoldError) {
       throw new ServiceError('CONFLICT_HOLD', 'この枠は既に他の予約で押さえられています');
     }
     throw e;
   }
+
+  try {
+    const gcfg = await googleConfigForUserId(page.organizerId);
+    if (gcfg) {
+      // 期限切れで解放された他Holdの「[調整中]」仮予定を先に掃除する。
+      for (const evId of releasedExpiredGoogleEventIds) {
+        await deleteCalendarEvent(gcfg, evId);
+      }
+      const googleEventId = await createHoldPlaceholderEvent(gcfg, {
+        summary: `[調整中] ${pageTitle(page)}`,
+        description:
+          '相手が候補日程を仮押さえ中です。確定するとこの予定は自動的に正式な予定に置き換わります。',
+        startMs: slot.start,
+        endMs: slot.end,
+      });
+      if (googleEventId) await repo.attachHoldGoogleEventId(hold.id, googleEventId);
+    }
+  } catch {
+    /* degrade-safe：カレンダー連携の失敗は仮押さえの成立に影響させない */
+  }
+
+  return { hold, expiresAt };
 }
 
-/** 確定（§14 POST /events/{id}/confirm）。holderId と participantId 一致を要求。 */
+/**
+ * 確定（§14 POST /events/{id}/confirm）。holderId と participantId 一致を要求。
+ * 確定済みHold自身・破棄された他候補の「[調整中]」仮予定はここで掃除する
+ * （正式な確定予定の作成は呼び出し元 /api/events/{id}/confirm が別途行う）。
+ */
 export async function confirmHold(
   repo: Repository,
   holdId: string,
@@ -230,8 +273,8 @@ export async function confirmHold(
     throw new ServiceError('FORBIDDEN', 'この Hold を確定する権限がありません');
   }
 
-  const conf = await repo.confirmHold(holdId, { participantId, formAnswers, now });
-  if (!conf) {
+  const result = await repo.confirmHold(holdId, { participantId, formAnswers, now });
+  if (!result) {
     // active かつ TTL 超過＝期限切れ／released＝他確定で破棄 or 解放。いずれも確定不可。
     const latest = await repo.getHold(holdId);
     if (latest && latest.status === 'active' && latest.expiresAt <= now) {
@@ -239,5 +282,22 @@ export async function confirmHold(
     }
     throw new ServiceError('EXPIRED', 'この枠は確定できません（期限切れ、または他の確定により解放済み）');
   }
-  return conf;
+
+  try {
+    const ev = await repo.getEvent(hold.eventId);
+    const page = ev ? await repo.getPageById(ev.pageId) : null;
+    const gcfg = page ? await googleConfigForUserId(page.organizerId) : null;
+    if (gcfg) {
+      const toDelete = [result.confirmedHoldGoogleEventId, ...result.releasedGoogleEventIds].filter(
+        (id): id is string => !!id,
+      );
+      for (const evId of toDelete) {
+        await deleteCalendarEvent(gcfg, evId);
+      }
+    }
+  } catch {
+    /* degrade-safe */
+  }
+
+  return result.confirmation;
 }
