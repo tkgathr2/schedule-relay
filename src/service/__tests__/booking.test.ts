@@ -6,6 +6,7 @@ import {
   createEventForPage,
   holdSlot,
   confirmHold,
+  releaseHeldSlot,
   resolveSettings,
 } from '../booking.js';
 import { ServiceError, type ServiceErrorCode } from '../errors.js';
@@ -312,6 +313,38 @@ describe('Hold の googleEventId 掃除ロジック（repo層・「[調整中]�
     const result = await repo.confirmHold(holdX.id, { participantId: 'guest-1', now: NOW + MIN });
     expect(result?.confirmedHoldGoogleEventId).toBe('gcal-evt-x');
     expect(result?.releasedGoogleEventIds).toEqual(['gcal-evt-y']);
+  });
+});
+
+describe('releaseHeldSlot（相手が別の枠に選び直したときの明示解放）', () => {
+  let repo: MemoryRepository;
+  beforeEach(() => {
+    repo = new MemoryRepository();
+  });
+
+  it('holderId一致なら解放でき、枠は再度holdできるようになる', async () => {
+    const page = await makePage(repo);
+    const { event } = await createEventForPage(repo, page.slug, 'rel-1');
+    const { hold } = await holdSlot(repo, event.id, SLOT_10, 'guest-1', NOW);
+
+    await releaseHeldSlot(repo, hold.id, 'guest-1');
+    const released = await repo.getHold(hold.id);
+    expect(released?.status).toBe('released');
+
+    // 解放後は同じ枠を別人がholdできる（EXCLUDE制約に引っかからない）
+    const { hold: hold2 } = await holdSlot(repo, event.id, SLOT_10, 'guest-2', NOW + MIN);
+    expect(hold2.status).toBe('active');
+  });
+
+  it('holderId不一致は FORBIDDEN（他人のholdを解放させない）', async () => {
+    const page = await makePage(repo);
+    const { event } = await createEventForPage(repo, page.slug, 'rel-2');
+    const { hold } = await holdSlot(repo, event.id, SLOT_10, 'guest-1', NOW);
+    await expectCode('FORBIDDEN', () => releaseHeldSlot(repo, hold.id, 'attacker'));
+  });
+
+  it('存在しないholdIdを渡しても例外にならない（冪等・二重解放安全）', async () => {
+    await expect(releaseHeldSlot(repo, 'nonexistent', 'guest-1')).resolves.toBeUndefined();
   });
 });
 

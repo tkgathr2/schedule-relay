@@ -79,6 +79,7 @@ export function isPublicPath(pathname: string, method: string): boolean {
   if (m === 'GET' && /^\/api\/pages\/[^/]+\/availability$/.test(pathname)) return true;
   if (m === 'POST' && pathname === '/api/events') return true;
   if (m === 'POST' && /^\/api\/events\/[^/]+\/(holds|confirm)$/.test(pathname)) return true;
+  if (m === 'DELETE' && /^\/api\/events\/[^/]+\/holds\/[^/]+$/.test(pathname)) return true;
   if (m === 'GET' && /^\/api\/events\/[^/]+\/relay$/.test(pathname)) return true;
   if (m === 'POST' && /^\/api\/events\/[^/]+\/relay\/advance$/.test(pathname)) return true;
 
