@@ -22,6 +22,25 @@ type SlotDto = { start: string; end: string };
 type BusyDto = { start: string; end: string; title?: string };
 type BusyByCalendar = Record<string, BusyDto[]>;
 
+// 曜日ごとの営業時間（社長要望：土日も候補に含める／水曜だけ休みにする、等の個別設定用）
+type DayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
+type DayHours = { enabled: boolean; start: string; end: string };
+const DAY_KEYS: DayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+const DAY_LABELS: Record<DayKey, string> = { mon: '月', tue: '火', wed: '水', thu: '木', fri: '金', sat: '土', sun: '日' };
+// JS の Date#getDay()（0=日〜6=土）→ DayKey の対応表
+const WEEKDAY_TO_KEY: DayKey[] = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+function defaultWeeklyHours(): Record<DayKey, DayHours> {
+  return {
+    mon: { enabled: true, start: '09:00', end: '18:00' },
+    tue: { enabled: true, start: '09:00', end: '18:00' },
+    wed: { enabled: true, start: '09:00', end: '18:00' },
+    thu: { enabled: true, start: '09:00', end: '18:00' },
+    fri: { enabled: true, start: '09:00', end: '18:00' },
+    sat: { enabled: false, start: '09:00', end: '18:00' },
+    sun: { enabled: false, start: '09:00', end: '18:00' },
+  };
+}
+
 const TZ = 'Asia/Tokyo';
 const HOUR_START = 8; // 表示開始
 const HOUR_END = 23; // 表示終了
@@ -176,8 +195,34 @@ export default function ProposePage() {
     const target = baseMs + daysUntilNextSun * 24 * 60 * 60 * 1000;
     setPeriodEnd(msToJstYmd(target));
   }
-  const [whStart, setWhStart] = useState('09:00');
-  const [whEnd, setWhEnd] = useState('18:00');
+  const [weeklyHours, setWeeklyHours] = useState<Record<DayKey, DayHours>>(defaultWeeklyHours());
+  // 週の中で有効な曜日の中の最速開始/最遅終了（ドラッグ境界クランプの全体上限として使う。個別の枠は hoursForYmd で曜日別に取る）
+  const whStart = useMemo(() => {
+    const enabled = DAY_KEYS.filter((k) => weeklyHours[k].enabled);
+    return enabled.length ? enabled.map((k) => weeklyHours[k].start).sort()[0]! : '09:00';
+  }, [weeklyHours]);
+  const whEnd = useMemo(() => {
+    const enabled = DAY_KEYS.filter((k) => weeklyHours[k].enabled);
+    return enabled.length ? enabled.map((k) => weeklyHours[k].end).sort().slice(-1)[0]! : '18:00';
+  }, [weeklyHours]);
+  // 指定日(YYYY-MM-DD)の曜日の営業時間を返す。休みの日は null。
+  const hoursForYmd = useCallback(
+    (ymd: string): { start: string; end: string } | null => {
+      const dow = new Date(`${ymd}T00:00:00+09:00`).getUTCDay();
+      const key = WEEKDAY_TO_KEY[dow]!;
+      const h = weeklyHours[key];
+      return h.enabled ? { start: h.start, end: h.end } : null;
+    },
+    [weeklyHours],
+  );
+  // API に渡す WorkingHours 形式（7曜日を個別指定。休みの曜日は空配列）
+  const buildWorkingHoursPayload = useCallback(() => {
+    const out: Record<string, string[]> = { tz: 'Asia/Tokyo' } as unknown as Record<string, string[]>;
+    for (const k of DAY_KEYS) {
+      out[k] = weeklyHours[k].enabled ? [weeklyHours[k].start, weeklyHours[k].end] : [];
+    }
+    return out as unknown as { tz: string } & Record<DayKey, string[]>;
+  }, [weeklyHours]);
   const [bufBefore, setBufBefore] = useState(0);
   const [bufAfter, setBufAfter] = useState(10);
   const [minNotice, setMinNotice] = useState(60);
@@ -193,6 +238,57 @@ export default function ProposePage() {
     try { localStorage.setItem('schedule-relay:propose-cutoff-mode', cutoffMode); } catch { /* noop */ }
   }, [cutoffMode]);
   const [maxSlots, setMaxSlots] = useState(50);
+
+  // 「今回の設定を保存する」チェックボックス：ON時は下記フォーム設定一式を localStorage に保存し、
+  // 次回このページを開いたときに自動復元する（社長要望「毎回設定するのがめんどくさい」）。
+  // 期間・タイトルは開くたびに変わるものなので保存対象から外す。
+  const SAVED_SETTINGS_KEY = 'schedule-relay:propose-saved-settings';
+  const [saveSettings, setSaveSettings] = useState(false);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SAVED_SETTINGS_KEY);
+      if (raw) {
+        const s = JSON.parse(raw) as {
+          adjType?: 'T2' | 'T3';
+          duration?: number;
+          weeklyHours?: Record<DayKey, DayHours>;
+          bufBefore?: number;
+          bufAfter?: number;
+          minNotice?: number;
+          maxSlots?: number;
+        };
+        if (s.adjType === 'T2' || s.adjType === 'T3') setAdjType(s.adjType);
+        if (typeof s.duration === 'number') setDuration(s.duration);
+        if (s.weeklyHours) setWeeklyHours(s.weeklyHours);
+        if (typeof s.bufBefore === 'number') setBufBefore(s.bufBefore);
+        if (typeof s.bufAfter === 'number') setBufAfter(s.bufAfter);
+        if (typeof s.minNotice === 'number') setMinNotice(s.minNotice);
+        if (typeof s.maxSlots === 'number') setMaxSlots(s.maxSlots);
+        setSaveSettings(true);
+      }
+    } catch {
+      /* noop */
+    } finally {
+      setSettingsLoaded(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (!settingsLoaded) return; // 復元処理が終わる前に「未保存状態」で上書きしてしまうのを防ぐ
+    try {
+      if (saveSettings) {
+        localStorage.setItem(
+          SAVED_SETTINGS_KEY,
+          JSON.stringify({ adjType, duration, weeklyHours, bufBefore, bufAfter, minNotice, maxSlots }),
+        );
+      } else {
+        localStorage.removeItem(SAVED_SETTINGS_KEY);
+      }
+    } catch {
+      /* noop */
+    }
+  }, [settingsLoaded, saveSettings, adjType, duration, weeklyHours, bufBefore, bufAfter, minNotice, maxSlots]);
 
   // カレンダー
   const [calendars, setCalendars] = useState<Calendar[]>([]);
@@ -329,8 +425,10 @@ export default function ProposePage() {
   }, [selectedCals, loadingCals]);
 
   const canExtract = useMemo(() => {
-    return periodStart < periodEnd && whStart < whEnd && !extracting;
-  }, [title, periodStart, periodEnd, whStart, whEnd, extracting]);
+    const enabledDays = DAY_KEYS.filter((k) => weeklyHours[k].enabled);
+    const allValid = enabledDays.length > 0 && enabledDays.every((k) => weeklyHours[k].start < weeklyHours[k].end);
+    return periodStart < periodEnd && allValid && !extracting;
+  }, [title, periodStart, periodEnd, weeklyHours, extracting]);
 
   // 自動抽出：初回ロード後＋設定変更時に自動で候補を抽出（社長指摘
   // 「候補を自動抽出押さなくても自動で最初から抽出出来る？」）。
@@ -345,7 +443,7 @@ export default function ProposePage() {
     return () => clearTimeout(t);
     // 設定変更で自動再抽出する依存。selectedCals は Set なのでサイズと内容で監視
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadingCals, periodStart, periodEnd, duration, whStart, whEnd, bufBefore, bufAfter, minNotice, maxSlots, selectedCals, cutoffMode]);
+  }, [loadingCals, periodStart, periodEnd, duration, weeklyHours, bufBefore, bufAfter, minNotice, maxSlots, selectedCals, cutoffMode]);
 
   // カレンダーID → 色 マップ
   const calColorMap = useMemo(() => {
@@ -369,12 +467,7 @@ export default function ProposePage() {
         periodStart: new Date(`${busyFrom}T00:00:00+09:00`).toISOString(),
         periodEnd: new Date(`${periodEnd}T23:59:59+09:00`).toISOString(),
         durationMinutes: duration,
-        workingHours: {
-          tz: 'Asia/Tokyo',
-          mon_fri: [whStart, whEnd],
-          sat: [],
-          sun: [],
-        },
+        workingHours: buildWorkingHoursPayload(),
         bufferBeforeMin: bufBefore,
         bufferAfterMin: bufAfter,
         minNoticeMin: minNotice,
@@ -416,12 +509,7 @@ export default function ProposePage() {
         min_notice_minutes: minNotice,
         horizon_days: 30,
         buffer_minutes: { before: bufBefore, after: bufAfter },
-        working_hours: {
-          tz: 'Asia/Tokyo',
-          mon_fri: [whStart, whEnd],
-          sat: [],
-          sun: [],
-        },
+        working_hours: buildWorkingHoursPayload(),
       };
       const res = await fetch('/api/pages', {
         method: 'POST',
@@ -640,8 +728,9 @@ export default function ProposePage() {
       // その日の busy（他候補 + busy）を収集（衝突判定用）。グループ内 slot は除外
       const dayStartMs = jstDateMs(dayYmd);
       const dayEndMs = addDays(dayStartMs, 1);
-      const whStartMs = new Date(`${dayYmd}T${whStart}:00+09:00`).getTime();
-      const whEndMs = new Date(`${dayYmd}T${whEnd}:00+09:00`).getTime();
+      const dayHours = hoursForYmd(dayYmd) ?? { start: whStart, end: whEnd };
+      const whStartMs = new Date(`${dayYmd}T${dayHours.start}:00+09:00`).getTime();
+      const whEndMs = new Date(`${dayYmd}T${dayHours.end}:00+09:00`).getTime();
 
       const busiesSameDay: { start: number; end: number }[] = [];
       for (const calId of Object.keys(busyByCalendar)) {
@@ -804,7 +893,7 @@ export default function ProposePage() {
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);
     },
-    [busyByCalendar, slots, slotOverrides, whStart, whEnd, duration],
+    [busyByCalendar, slots, slotOverrides, weeklyHours, hoursForYmd, whStart, whEnd, duration],
   );
 
   // /api/pages 送信用：override を反映した slot 配列
@@ -948,10 +1037,63 @@ export default function ProposePage() {
             </div>
 
             <div className="sc-field">
-              <label>営業時間（平日）</label>
-              <div className="sc-row2">
-                <input className="sc-input" type="time" value={whStart} onChange={(e) => setWhStart(e.target.value)} />
-                <input className="sc-input" type="time" value={whEnd} onChange={(e) => setWhEnd(e.target.value)} />
+              <label>
+                営業時間（曜日ごと）
+                <button
+                  type="button"
+                  className="sc-btn-sm"
+                  style={{ marginLeft: 8, fontSize: 11 }}
+                  onClick={() => {
+                    // 平日(月〜金)を1行目(月)の値で一括揃える
+                    setWeeklyHours((prev) => {
+                      const base = prev.mon;
+                      const next = { ...prev };
+                      (['mon', 'tue', 'wed', 'thu', 'fri'] as DayKey[]).forEach((k) => {
+                        next[k] = { ...base };
+                      });
+                      return next;
+                    });
+                  }}
+                >
+                  月の設定を平日に一括コピー
+                </button>
+              </label>
+              <div className="sc-weekly-hours">
+                {DAY_KEYS.map((k) => {
+                  const h = weeklyHours[k];
+                  return (
+                    <div key={k} className="sc-weekly-hours-row">
+                      <label className="sc-weekly-hours-day">
+                        <input
+                          type="checkbox"
+                          checked={h.enabled}
+                          onChange={(e) =>
+                            setWeeklyHours((prev) => ({ ...prev, [k]: { ...prev[k], enabled: e.target.checked } }))
+                          }
+                        />
+                        {DAY_LABELS[k]}
+                      </label>
+                      <input
+                        className="sc-input"
+                        type="time"
+                        disabled={!h.enabled}
+                        value={h.start}
+                        onChange={(e) => setWeeklyHours((prev) => ({ ...prev, [k]: { ...prev[k], start: e.target.value } }))}
+                      />
+                      <span className="sc-weekly-hours-sep">〜</span>
+                      <input
+                        className="sc-input"
+                        type="time"
+                        disabled={!h.enabled}
+                        value={h.end}
+                        onChange={(e) => setWeeklyHours((prev) => ({ ...prev, [k]: { ...prev[k], end: e.target.value } }))}
+                      />
+                      {h.enabled && h.start >= h.end && (
+                        <span className="sc-weekly-hours-err">開始は終了より前にしてください</span>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
@@ -994,6 +1136,11 @@ export default function ProposePage() {
                 {[10, 20, 30, 50, 100, 200].map((m) => <option key={m} value={m}>{m}件</option>)}
               </select>
             </div>
+
+            <label className="sc-save-settings">
+              <input type="checkbox" checked={saveSettings} onChange={(e) => setSaveSettings(e.target.checked)} />
+              今回の設定（調整タイプ・打合せ時間・営業時間・バッファ・直前ブロック・抽出件数）を保存する
+            </label>
 
             <button className="sc-btn primary" disabled={!canExtract} onClick={extract} style={{ width: '100%' }}>
               {extracting ? '抽出中…' : '候補を自動抽出'}

@@ -9,12 +9,23 @@ import type { Interval } from './types.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** 曜日別の受付時間帯。各値は ["09:00","18:00"] のような HH:MM ペアの平坦配列（空=休業）。 */
+/**
+ * 曜日別の受付時間帯。各値は ["09:00","18:00"] のような HH:MM ペアの平坦配列（空=休業）。
+ *
+ * 個別曜日（mon〜fri）を指定すればそちらが優先される（例：水曜だけ休みにする、
+ * 木曜だけ短縮する等）。個別指定が無い曜日は mon_fri にフォールバックする
+ * （既存データ・「平日は一括」設定との後方互換のため）。
+ */
 export interface WorkingHours {
   /** IANA タイムゾーン（例: "Asia/Tokyo"）。 */
   readonly tz: string;
-  /** 月〜金。 */
+  /** 月〜金の既定値（個別曜日が未指定のときのフォールバック）。 */
   readonly mon_fri?: readonly string[];
+  readonly mon?: readonly string[];
+  readonly tue?: readonly string[];
+  readonly wed?: readonly string[];
+  readonly thu?: readonly string[];
+  readonly fri?: readonly string[];
   /** 土。 */
   readonly sat?: readonly string[];
   /** 日。 */
@@ -85,11 +96,18 @@ function parseHm(s: string): { h: number; m: number } | null {
   return { h, m };
 }
 
-/** 曜日番号(0=日..6=土)に対応する時間帯ペア配列を返す。 */
+/** 曜日番号(0=日..6=土)に対応する時間帯ペア配列を返す。個別曜日指定があれば優先、無ければ mon_fri にフォールバック。 */
 function rangesForWeekday(wh: WorkingHours, weekday: number): readonly string[] {
-  if (weekday === 0) return wh.sun ?? [];
-  if (weekday === 6) return wh.sat ?? [];
-  return wh.mon_fri ?? [];
+  switch (weekday) {
+    case 0: return wh.sun ?? [];
+    case 6: return wh.sat ?? [];
+    case 1: return wh.mon ?? wh.mon_fri ?? [];
+    case 2: return wh.tue ?? wh.mon_fri ?? [];
+    case 3: return wh.wed ?? wh.mon_fri ?? [];
+    case 4: return wh.thu ?? wh.mon_fri ?? [];
+    case 5: return wh.fri ?? wh.mon_fri ?? [];
+    default: return [];
+  }
 }
 
 /**
