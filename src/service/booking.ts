@@ -77,6 +77,11 @@ export function resolveSettings(raw: unknown): ResolvedSettings {
     workingHours: {
       tz: typeof wh.tz === 'string' ? wh.tz : 'Asia/Tokyo',
       mon_fri: strArr(wh.mon_fri) ?? ['09:00', '18:00'],
+      mon: strArr(wh.mon),
+      tue: strArr(wh.tue),
+      wed: strArr(wh.wed),
+      thu: strArr(wh.thu),
+      fri: strArr(wh.fri),
       sat: strArr(wh.sat) ?? [],
       sun: strArr(wh.sun) ?? [],
     },

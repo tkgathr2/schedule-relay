@@ -7,6 +7,7 @@ import { getRepository } from '@/repo/index';
 import { ServiceError } from '@/service/errors';
 import { jsonError } from '@/service/http';
 import { assertValidSlug } from '@/service/security';
+import { requireSessionUserId } from '@/service/auth/session';
 
 export async function POST(
   _req: Request,
@@ -16,7 +17,15 @@ export async function POST(
     const { slug } = await ctx.params;
     if (!slug) throw new ServiceError('VALIDATION', 'slug が必要です');
     assertValidSlug(slug);
+    // slug は相手に配るURL(/b/{slug})の一部＝実質公開値のため、
+    // ログインしていれば誰でも叩けてしまう。所有者本人か必ず確認する（破壊的操作のため）。
+    const me = await requireSessionUserId();
     const repo = getRepository();
+    const existing = await repo.getPageBySlug(slug);
+    if (!existing) throw new ServiceError('NOT_FOUND', `slug が見つかりません: ${slug}`);
+    if (existing.organizerId !== me) {
+      throw new ServiceError('FORBIDDEN', 'このページを操作する権限がありません');
+    }
     const page = await repo.deactivatePageBySlug(slug);
     if (!page) throw new ServiceError('NOT_FOUND', `slug が見つかりません: ${slug}`);
     return NextResponse.json({ page });

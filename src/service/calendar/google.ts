@@ -171,7 +171,10 @@ export async function googleFreeBusy(
     // 明示指定があればそちらを優先（候補抽出UIで複数選択した結果を直接渡す）。
     let ids = opts?.calendarIds && opts.calendarIds.length > 0 ? opts.calendarIds : cfg.calendarIds;
     if (ids.includes('auto')) {
-      const list = await cal.calendarList.list({ maxResults: 250 });
+      // showHidden: true — listGoogleCalendars と同様、Google側で非表示設定のカレンダーも
+      // 'auto' 展開（busy算出・タイトル取得）に含める。片方だけ付け忘れると「一覧では選べるのに
+      // 空き算出には効かない」という気づきにくい不整合になる。
+      const list = await cal.calendarList.list({ maxResults: 250, showHidden: true });
       const all = (list.data.items ?? [])
         .map((c) => c.id)
         .filter((id): id is string => !!id);
@@ -224,7 +227,10 @@ export async function googleFreeBusyByCalendar(
 
     let ids = calendarIds;
     if (ids.includes('auto')) {
-      const list = await cal.calendarList.list({ maxResults: 250 });
+      // showHidden: true — listGoogleCalendars と同様、Google側で非表示設定のカレンダーも
+      // 'auto' 展開（busy算出・タイトル取得）に含める。片方だけ付け忘れると「一覧では選べるのに
+      // 空き算出には効かない」という気づきにくい不整合になる。
+      const list = await cal.calendarList.list({ maxResults: 250, showHidden: true });
       const all = (list.data.items ?? [])
         .map((c) => c.id)
         .filter((id): id is string => !!id);
@@ -284,7 +290,10 @@ export async function googleEventTitlesByCalendar(
 
     let ids = calendarIds;
     if (ids.includes('auto')) {
-      const list = await cal.calendarList.list({ maxResults: 250 });
+      // showHidden: true — listGoogleCalendars と同様、Google側で非表示設定のカレンダーも
+      // 'auto' 展開（busy算出・タイトル取得）に含める。片方だけ付け忘れると「一覧では選べるのに
+      // 空き算出には効かない」という気づきにくい不整合になる。
+      const list = await cal.calendarList.list({ maxResults: 250, showHidden: true });
       const all = (list.data.items ?? [])
         .map((c) => c.id)
         .filter((id): id is string => !!id);

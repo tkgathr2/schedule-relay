@@ -6,6 +6,7 @@ import {
   createEventForPage,
   holdSlot,
   confirmHold,
+  resolveSettings,
 } from '../booking.js';
 import { ServiceError, type ServiceErrorCode } from '../errors.js';
 import { expandWorkingWindows } from '../../domain/working-hours.js';
@@ -259,5 +260,51 @@ describe('検証エラー（§20）', () => {
     const { event } = await createEventForPage(repo, page.slug, 'e6');
     const { hold } = await holdSlot(repo, event.id, SLOT_10, 'guest-1', NOW);
     await expectCode('FORBIDDEN', () => confirmHold(repo, hold.id, 'attacker', null, NOW + MIN));
+  });
+});
+
+describe('resolveSettings: 曜日別 working_hours の往復（回帰防止・指摘14/#16）', () => {
+  // /propose の buildWorkingHoursPayload が出力する形式（mon_fri を含まず、7曜日を個別指定）を
+  // そのまま resolveSettings に通して、個別曜日キーが握りつぶされず既定値(09:00-18:00)に
+  // フォールバックしないことを確認する。過去に mon/tue/wed/thu/fri が未読み取りのまま
+  // 既定値へ落ちる回帰があった（PR#16→本PRで修正）。
+  it('平日を個別設定した working_hours がそのまま解決される（水曜だけ休みにできる）', () => {
+    const payload = {
+      tz: 'Asia/Tokyo',
+      mon: ['13:00', '17:00'],
+      tue: ['13:00', '17:00'],
+      wed: [], // 水曜休み
+      thu: ['13:00', '17:00'],
+      fri: ['13:00', '17:00'],
+      sat: [],
+      sun: [],
+    };
+    const resolved = resolveSettings(JSON.parse(JSON.stringify({ working_hours: payload })));
+    expect(resolved.workingHours.mon).toEqual(['13:00', '17:00']);
+    expect(resolved.workingHours.wed).toEqual([]);
+    expect(resolved.workingHours.fri).toEqual(['13:00', '17:00']);
+    // mon_fri は個別指定が無いときだけのフォールバックなので既定値のままでよいが、
+    // rangesForWeekday 側は mon 等の個別指定を優先するため実際の展開には影響しない。
+  });
+
+  it('土日を有効化した working_hours も解決される', () => {
+    const payload = {
+      tz: 'Asia/Tokyo',
+      mon: ['09:00', '18:00'],
+      tue: ['09:00', '18:00'],
+      wed: ['09:00', '18:00'],
+      thu: ['09:00', '18:00'],
+      fri: ['09:00', '18:00'],
+      sat: ['10:00', '15:00'],
+      sun: [],
+    };
+    const resolved = resolveSettings(JSON.parse(JSON.stringify({ working_hours: payload })));
+    expect(resolved.workingHours.sat).toEqual(['10:00', '15:00']);
+  });
+
+  it('個別曜日が未指定なら mon_fri の既定値にフォールバックする（後方互換）', () => {
+    const resolved = resolveSettings({ working_hours: { tz: 'Asia/Tokyo' } });
+    expect(resolved.workingHours.mon).toBeUndefined();
+    expect(resolved.workingHours.mon_fri).toEqual(['09:00', '18:00']);
   });
 });
