@@ -103,8 +103,16 @@ export async function createCalendarEventWithMeet(
 }
 
 /**
+ * Google カレンダーのイベント色ID（標準11色）。仮押さえ中の予定は他の通常予定と
+ * 見た目で区別できるよう Graphite（灰色）で登録する。
+ * 参考: https://developers.google.com/calendar/api/v3/reference/colors
+ */
+const GOOGLE_CALENDAR_COLOR_GRAPHITE = '8';
+
+/**
  * 仮押さえ（Hold）中、主催者カレンダーに一時的な「[調整中]」予定を作る。
  * 確定前の段階なので Meet URL は発行せず・相手にも通知しない（sendUpdates:'none'）。
+ * 色は灰色（Graphite）に固定し、確定済みの通常予定とひと目で区別できるようにする。
  * 失敗時は null を返す（degrade-safe：Google未連携でも仮押さえ自体は成立する）。
  */
 export interface CreateHoldPlaceholderInput {
@@ -130,6 +138,7 @@ export async function createHoldPlaceholderEvent(
         description: input.description,
         start: { dateTime: new Date(input.startMs).toISOString() },
         end: { dateTime: new Date(input.endMs).toISOString() },
+        colorId: GOOGLE_CALENDAR_COLOR_GRAPHITE,
       },
     });
     return res.data.id ?? null;
