@@ -81,7 +81,10 @@ export async function POST(req: Request): Promise<NextResponse> {
       periodStart,
       periodEnd,
       durationMinutes: duration,
-      gridMinutes: typeof body.gridMinutes === 'number' ? body.gridMinutes : 15,
+      // 未指定なら proposeSlots 側の既定（durationMinutesと同じgrid＝重複候補ゼロ）に委ねる。
+      // ここで15分固定を渡すと、60分等の会議で15分刻みの重複候補が大量発生し、
+      // maxSlotsに序盤の数日だけで達して後半の日程（土日等）に候補が到達しなくなる。
+      gridMinutes: typeof body.gridMinutes === 'number' ? body.gridMinutes : undefined,
       workingHours,
       bufferBeforeMin: typeof body.bufferBeforeMin === 'number' ? body.bufferBeforeMin : 0,
       bufferAfterMin: typeof body.bufferAfterMin === 'number' ? body.bufferAfterMin : 0,
