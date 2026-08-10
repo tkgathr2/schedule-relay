@@ -376,6 +376,8 @@ export default function ProposePage() {
   }, [midCollapsed]);
   const [extracting, setExtracting] = useState(false);
   const [extractErr, setExtractErr] = useState<string | null>(null);
+  // クリックした既存予定の詳細を表示するためのポップオーバー状態
+  const [selectedBusy, setSelectedBusy] = useState<{ calId: string; start: number; end: number; title?: string } | null>(null);
 
   // 週ナビ：表示開始週（月曜・JST ms）
   // 初期表示は「期間開始日が含まれる週」（今日の週がまだ期間に入っていない場合の白紙画面を避ける）
@@ -475,6 +477,13 @@ export default function ProposePage() {
   const calColorMap = useMemo(() => {
     const m = new Map<string, string>();
     for (const c of calendars) m.set(c.id, c.backgroundColor || '#9ca3af');
+    return m;
+  }, [calendars]);
+
+  // カレンダーID → 表示名 マップ（既存予定クリック時の詳細表示用）
+  const calNameMap = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of calendars) m.set(c.id, c.summary);
     return m;
   }, [calendars]);
 
@@ -1285,9 +1294,10 @@ export default function ProposePage() {
                           return (
                             <div
                               key={`b${bi}`}
-                              className="pp-cal-busy"
+                              className="pp-cal-busy pp-cal-busy-clickable"
                               style={{ top, height, background: hexToRgba(color, 0.28), borderColor: hexToRgba(color, 0.5), borderLeft: `3px solid ${color}` }}
                               title={b.title || '予定あり'}
+                              onClick={(e) => { e.stopPropagation(); setSelectedBusy(b); }}
                             >
                               {b.title && <div className="pp-cal-busy-title">{b.title}</div>}
                               <div className="pp-cal-busy-time">
@@ -1363,6 +1373,35 @@ export default function ProposePage() {
               {applyErr && <div className="sc-err" style={{ marginTop: 10 }}>{applyErr}</div>}
             </div>
           </section>
+        </div>
+      )}
+      {selectedBusy && (
+        <div className="pp-busy-modal-overlay" onClick={() => setSelectedBusy(null)}>
+          <div className="pp-busy-modal" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className="pp-busy-modal-close"
+              aria-label="閉じる"
+              onClick={() => setSelectedBusy(null)}
+            >
+              ✕
+            </button>
+            <div className="pp-busy-modal-title">{selectedBusy.title || '(タイトルなし)'}</div>
+            <div className="pp-busy-modal-time">
+              {new Date(selectedBusy.start).toLocaleDateString('ja-JP', { timeZone: TZ, month: 'long', day: 'numeric', weekday: 'short' })}
+              {'　'}
+              {new Date(selectedBusy.start).toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false })}
+              〜
+              {new Date(selectedBusy.end).toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false })}
+            </div>
+            <div className="pp-busy-modal-cal">
+              <span
+                className="pp-busy-modal-cal-dot"
+                style={{ background: calColorMap.get(selectedBusy.calId) || '#9ca3af' }}
+              />
+              {calNameMap.get(selectedBusy.calId) || 'カレンダー'}
+            </div>
+          </div>
         </div>
       )}
     </div>
