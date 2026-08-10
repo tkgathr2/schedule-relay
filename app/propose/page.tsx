@@ -209,25 +209,6 @@ export default function ProposePage() {
     setPeriodEnd(msToJstYmd(target));
   }
   const [weeklyHours, setWeeklyHours] = useState<Record<DayKey, DayHours>>(defaultWeeklyHours());
-  // 週の中で有効な曜日の中の最速開始/最遅終了（ドラッグ境界クランプの全体上限として使う。個別の枠は hoursForYmd で曜日別に取る）
-  const whStart = useMemo(() => {
-    const enabled = DAY_KEYS.filter((k) => weeklyHours[k].enabled);
-    return enabled.length ? enabled.map((k) => weeklyHours[k].start).sort()[0]! : '09:00';
-  }, [weeklyHours]);
-  const whEnd = useMemo(() => {
-    const enabled = DAY_KEYS.filter((k) => weeklyHours[k].enabled);
-    return enabled.length ? enabled.map((k) => weeklyHours[k].end).sort().slice(-1)[0]! : '18:00';
-  }, [weeklyHours]);
-  // 指定日(YYYY-MM-DD)の曜日の営業時間を返す。休みの日は null。
-  const hoursForYmd = useCallback(
-    (ymd: string): { start: string; end: string } | null => {
-      const dow = new Date(`${ymd}T00:00:00Z`).getUTCDay();
-      const key = WEEKDAY_TO_KEY[dow]!;
-      const h = weeklyHours[key];
-      return h.enabled ? { start: h.start, end: h.end } : null;
-    },
-    [weeklyHours],
-  );
   // API に渡す WorkingHours 形式（7曜日を個別指定。休みの曜日は空配列）
   const buildWorkingHoursPayload = useCallback(() => {
     const out: Record<string, string[]> = { tz: 'Asia/Tokyo' } as unknown as Record<string, string[]>;
@@ -381,6 +362,8 @@ export default function ProposePage() {
   const [extractErr, setExtractErr] = useState<string | null>(null);
   // クリックした既存予定の詳細を表示するためのポップオーバー状態
   const [selectedBusy, setSelectedBusy] = useState<{ calId: string; start: number; end: number; title?: string } | null>(null);
+  // 空白ドラッグで候補を新規作成中のプレビュー（ゴースト表示用）。null=非ドラッグ中
+  const [createDrag, setCreateDrag] = useState<{ ymd: string; start: number; end: number } | null>(null);
 
   // 週ナビ：表示開始週（月曜・JST ms）
   // 初期表示は「期間開始日が含まれる週」（今日の週がまだ期間に入っていない場合の白紙画面を避ける）
@@ -707,32 +690,82 @@ export default function ProposePage() {
 
   // 空いている場所をクリックして、その時刻から duration 分の候補を手動追加する
   // （自動抽出が拾わなかった日時にも、社長要望で候補を置けるようにする）。
-  const handleDayClick = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>, ymd: string, outOfPeriod: boolean) => {
+  // グリッドの表示範囲（HOUR_START〜HOUR_END）内で、その日の任意の位置を ms に変換（15分スナップ・範囲外はclamp）。
+  // 手動配置は自由（営業時間外でもOK＝社長要望）なので、営業時間ではなくグリッド表示範囲でのみ制限する。
+  const clientYToMs = useCallback((ymd: string, clientY: number, top: number) => {
+    const base = dayStartHourMs(ymd);
+    const gridUpperMs = base + (HOUR_END - HOUR_START) * 60 * 60_000;
+    const offsetY = clientY - top;
+    const minFromStart = (offsetY / SLOT_PX) * 60;
+    const snappedMin = Math.round(minFromStart / 15) * 15;
+    let ms = base + snappedMin * 60_000;
+    if (ms < base) ms = base;
+    if (ms > gridUpperMs) ms = gridUpperMs;
+    return ms;
+  }, []);
+
+  // 空いている場所をクリック／ドラッグして候補を手動追加する。
+  // - クリック（移動量<3px）：その時刻から duration 分の固定長候補を追加（従来のクリック挙動）
+  // - ドラッグ：ドラッグした範囲そのものを候補にする（15分スナップ・最小15分）
+  // 自動抽出は営業時間内に限定されるが、手動配置は営業時間外でも置けるようにする（社長要望）。
+  const startCreateDrag = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>, ymd: string, outOfPeriod: boolean) => {
       if (outOfPeriod) return;
-      const rect = e.currentTarget.getBoundingClientRect();
-      const offsetY = e.clientY - rect.top;
+      if (e.button !== 0) return;
+      const top = e.currentTarget.getBoundingClientRect().top;
       const base = dayStartHourMs(ymd);
-      const minFromStart = (offsetY / SLOT_PX) * 60;
-      const snappedMin = Math.round(minFromStart / 15) * 15;
-      const startMs = base + snappedMin * 60_000;
-      const endMs = startMs + duration * 60_000;
+      const gridUpperMs = base + (HOUR_END - HOUR_START) * 60 * 60_000;
+      const startMs = clientYToMs(ymd, e.clientY, top);
+      const startClientY = e.clientY;
+      let moved = false;
 
-      const dayBusies = busyForDay(ymd).map((b) => ({ start: b.start, end: b.end }));
-      if (hasConflict({ start: startMs, end: endMs }, dayBusies)) return;
+      const onMove = (ev: PointerEvent) => {
+        if (Math.abs(ev.clientY - startClientY) >= 3) moved = true;
+        const curMs = clientYToMs(ymd, ev.clientY, top);
+        let s = Math.min(startMs, curMs);
+        let en = Math.max(startMs, curMs);
+        if (en - s < 15 * 60_000) en = s + 15 * 60_000;
+        setCreateDrag({ ymd, start: s, end: en });
+      };
 
-      const newSlot: SlotDto = { start: new Date(startMs).toISOString(), end: new Date(endMs).toISOString() };
-      const exists = rawSlotsRef.current.some((s) => s.start === newSlot.start && s.end === newSlot.end);
-      if (exists) return;
-      const newIdx = rawSlotsRef.current.length;
-      setRawSlots((prev) => [...prev, newSlot]);
-      setSelectedSlots((prev) => {
-        const next = new Set(prev);
-        next.add(newIdx);
-        return next;
-      });
+      const onUp = (ev: PointerEvent) => {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        setCreateDrag(null);
+
+        let s: number;
+        let en: number;
+        if (moved) {
+          const curMs = clientYToMs(ymd, ev.clientY, top);
+          s = Math.min(startMs, curMs);
+          en = Math.max(startMs, curMs);
+          if (en - s < 15 * 60_000) en = s + 15 * 60_000;
+          if (en > gridUpperMs) { en = gridUpperMs; if (en - s < 15 * 60_000) s = en - 15 * 60_000; }
+        } else {
+          s = startMs;
+          en = startMs + duration * 60_000;
+          if (en > gridUpperMs) { en = gridUpperMs; s = Math.max(base, en - duration * 60_000); }
+        }
+
+        const dayBusies = busyForDay(ymd).map((b) => ({ start: b.start, end: b.end }));
+        if (hasConflict({ start: s, end: en }, dayBusies)) return;
+
+        const newSlot: SlotDto = { start: new Date(s).toISOString(), end: new Date(en).toISOString() };
+        const exists = rawSlotsRef.current.some((x) => x.start === newSlot.start && x.end === newSlot.end);
+        if (exists) return;
+        const newIdx = rawSlotsRef.current.length;
+        setRawSlots((prev) => [...prev, newSlot]);
+        setSelectedSlots((prev) => {
+          const next = new Set(prev);
+          next.add(newIdx);
+          return next;
+        });
+      };
+
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
     },
-    [duration, busyForDay],
+    [duration, busyForDay, clientYToMs],
   );
 
   // 表示週・各日に該当する候補（override 反映済）
@@ -799,9 +832,10 @@ export default function ProposePage() {
       // その日の busy（他候補 + busy）を収集（衝突判定用）。グループ内 slot は除外
       const dayStartMs = jstDateMs(dayYmd);
       const dayEndMs = addDays(dayStartMs, 1);
-      const dayHours = hoursForYmd(dayYmd) ?? { start: whStart, end: whEnd };
-      const whStartMs = new Date(`${dayYmd}T${dayHours.start}:00+09:00`).getTime();
-      const whEndMs = new Date(`${dayYmd}T${dayHours.end}:00+09:00`).getTime();
+      // 手動でのドラッグ移動／リサイズは営業時間ではなく、グリッド表示範囲（HOUR_START〜HOUR_END）内で自由に行える
+      // （社長要望：手動で置く分には営業時間外でもOK。自動抽出のみ営業時間内に限定）。
+      const gridLowerMs = dayStartHourMs(dayYmd);
+      const gridUpperMs = dayStartHourMs(dayYmd) + (HOUR_END - HOUR_START) * 60 * 60_000;
 
       const busiesSameDay: { start: number; end: number }[] = [];
       for (const calId of Object.keys(busyByCalendar)) {
@@ -836,9 +870,9 @@ export default function ProposePage() {
         const deltaMin = (deltaPx / SLOT_PX) * 60;
         const deltaMs = deltaMin * 60_000;
 
-        // 営業時間境界（候補は WH 内に収まる前提）
-        const lower = Math.max(dayStartMs, whStartMs);
-        const upper = Math.min(dayEndMs, whEndMs);
+        // グリッド表示範囲境界（営業時間ではなく HOUR_START〜HOUR_END の表示範囲でクランプ）
+        const lower = Math.max(dayStartMs, gridLowerMs);
+        const upper = Math.min(dayEndMs, gridUpperMs);
 
         if (cur.mode === 'move') {
           // グループ全体に同じ deltaMs を適用。グループの (start,end) で境界クランプ。
@@ -989,7 +1023,7 @@ export default function ProposePage() {
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);
     },
-    [busyByCalendar, slots, slotOverrides, weeklyHours, hoursForYmd, whStart, whEnd, duration],
+    [busyByCalendar, slots, slotOverrides, duration],
   );
 
   // /api/pages 送信用：override を反映した slot 配列
@@ -1344,8 +1378,8 @@ export default function ProposePage() {
                       <div
                         key={d.ymd}
                         className={`pp-cal-day ${d.outOfPeriod ? 'out-of-period' : ''}`}
-                        title={d.outOfPeriod ? undefined : 'クリックでこの時刻に候補を追加'}
-                        onClick={(e) => handleDayClick(e, d.ymd, d.outOfPeriod)}
+                        title={d.outOfPeriod ? undefined : 'クリックまたはドラッグで候補を追加（営業時間外もOK）'}
+                        onPointerDown={(e) => startCreateDrag(e, d.ymd, d.outOfPeriod)}
                       >
                         {/* 時間ガイド線 */}
                         {Array.from({ length: HOUR_END - HOUR_START }, (_, i) => i + HOUR_START).map((h) => (
@@ -1363,6 +1397,7 @@ export default function ProposePage() {
                               className="pp-cal-busy pp-cal-busy-clickable"
                               style={{ top, height, background: hexToRgba(color, 0.28), borderColor: hexToRgba(color, 0.5), borderLeft: `3px solid ${color}` }}
                               title={b.title || '予定あり'}
+                              onPointerDown={(e) => e.stopPropagation()}
                               onClick={(e) => { e.stopPropagation(); setSelectedBusy(b); }}
                             >
                               {b.title && <div className="pp-cal-busy-title">{b.title}</div>}
@@ -1374,6 +1409,13 @@ export default function ProposePage() {
                             </div>
                           );
                         })}
+                        {/* 新規候補ドラッグ中のゴーストプレビュー */}
+                        {createDrag && createDrag.ymd === d.ymd && (() => {
+                          const top = msToTopPx(createDrag.start, d.ymd);
+                          const height = durationMsToHeightPx(createDrag.start, createDrag.end, d.ymd);
+                          if (height <= 0) return null;
+                          return <div className="pp-cal-create-ghost" style={{ top, height }} />;
+                        })()}
                         {/* 候補ブロック：連続/重なる候補を1グループに統合して1つの大きな
                             青点線ブロックとして描画（Spirと同じUX）。
                             - クリック（移動量<3px）：グループ内全 slot を一括選択／解除

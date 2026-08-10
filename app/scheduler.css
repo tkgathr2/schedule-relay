@@ -265,6 +265,9 @@
   border-bottom-left-radius: 2px; border-bottom-right-radius: 2px; z-index: 6; }
 .pp-cal-cand-resize:hover { background: rgba(37, 99, 235, 0.25); }
 .pp-cal-cand.dragging .pp-cal-cand-resize { background: rgba(37, 99, 235, 0.35); }
+/* 空白ドラッグで候補を新規作成中のゴーストプレビュー */
+.pp-cal-create-ghost { position: absolute; left: 4px; right: 4px; border: 2px dashed #16a34a; border-radius: 4px;
+  background: rgba(22, 163, 74, 0.10); box-sizing: border-box; pointer-events: none; z-index: 7; }
 
 /* 凡例 */
 .pp-cal-legend { display: flex; gap: 12px; justify-content: flex-end; margin-top: 10px; font-size: 11px; color: #6b7280; flex-wrap: wrap; }
