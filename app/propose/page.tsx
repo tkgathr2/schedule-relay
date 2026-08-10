@@ -323,6 +323,9 @@ export default function ProposePage() {
 
   // 抽出結果
   const [rawSlots, setRawSlots] = useState<SlotDto[]>([]);
+  // 手動追加（空白クリック）で新しいslotのインデックスを計算するための最新値参照
+  const rawSlotsRef = useRef<SlotDto[]>([]);
+  useEffect(() => { rawSlotsRef.current = rawSlots; }, [rawSlots]);
   // cutoffMode === 'prev10' のときは「対象日の前日10:00 JSTを過ぎた候補」を除外
   const slots = useMemo<SlotDto[]>(() => {
     if (cutoffMode !== 'prev10') return rawSlots;
@@ -702,6 +705,36 @@ export default function ProposePage() {
     };
   }, [busyByCalendar]);
 
+  // 空いている場所をクリックして、その時刻から duration 分の候補を手動追加する
+  // （自動抽出が拾わなかった日時にも、社長要望で候補を置けるようにする）。
+  const handleDayClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>, ymd: string, outOfPeriod: boolean) => {
+      if (outOfPeriod) return;
+      const rect = e.currentTarget.getBoundingClientRect();
+      const offsetY = e.clientY - rect.top;
+      const base = dayStartHourMs(ymd);
+      const minFromStart = (offsetY / SLOT_PX) * 60;
+      const snappedMin = Math.round(minFromStart / 15) * 15;
+      const startMs = base + snappedMin * 60_000;
+      const endMs = startMs + duration * 60_000;
+
+      const dayBusies = busyForDay(ymd).map((b) => ({ start: b.start, end: b.end }));
+      if (hasConflict({ start: startMs, end: endMs }, dayBusies)) return;
+
+      const newSlot: SlotDto = { start: new Date(startMs).toISOString(), end: new Date(endMs).toISOString() };
+      const exists = rawSlotsRef.current.some((s) => s.start === newSlot.start && s.end === newSlot.end);
+      if (exists) return;
+      const newIdx = rawSlotsRef.current.length;
+      setRawSlots((prev) => [...prev, newSlot]);
+      setSelectedSlots((prev) => {
+        const next = new Set(prev);
+        next.add(newIdx);
+        return next;
+      });
+    },
+    [duration, busyForDay],
+  );
+
   // 表示週・各日に該当する候補（override 反映済）
   const candForDay = useMemo(() => {
     return (ymd: string): { idx: number; start: number; end: number }[] => {
@@ -712,6 +745,9 @@ export default function ProposePage() {
         const ov = slotOverrides[i];
         const sMs = Date.parse(ov?.start ?? s.start);
         const eMs = Date.parse(ov?.end ?? s.end);
+        // リサイズでグループ末尾が縮み、このslotが完全に範囲外になった場合、
+        // 0幅（start===end）のoverrideを付けて実質無効化する（下のresizeロジック参照）。
+        if (eMs <= sMs) return;
         if (eMs <= dayStart || sMs >= dayEnd) return;
         out.push({ idx: i, start: sMs, end: eMs });
       });
@@ -827,7 +863,9 @@ export default function ProposePage() {
             return nextOv;
           });
         } else {
-          // リサイズ：末尾 slot の end だけを延長／短縮（方式A）
+          // リサイズ：グループ全体の end を動かす。
+          // 最小サイズ制約は「グループ全体の start」から測る（末尾slot単体のstartから
+          // 測ると、複数slotから成るグループを1slot分＝durationより大きく縮められなくなる）。
           const tailOrig = cur.origs[cur.tailIdx];
           if (!tailOrig) return;
           const maxEnd = nextBusyStart(
@@ -835,25 +873,43 @@ export default function ProposePage() {
             conflictTargets,
           );
           const next = resizeEnd(
-            { start: tailOrig.start, end: tailOrig.end },
+            { start: cur.groupOrigStartMs, end: cur.groupOrigEndMs },
             deltaMs,
             upper,
             duration * 60_000,
             15,
             maxEnd,
           );
-          // 衝突判定はグループ全体（start = groupOrigStart, end = next.end）で
           cur.invalid = hasConflict(
             { start: cur.groupOrigStartMs, end: next.end },
             conflictTargets,
           );
-          setSlotOverrides((prev) => ({
-            ...prev,
-            [cur.tailIdx]: {
-              start: new Date(next.start).toISOString(),
-              end: new Date(next.end).toISOString(),
-            },
-          }));
+          // グループ内の各slotを新しい group end (next.end) に合わせて調整する：
+          //  - 末尾slotは常に新end まで伸縮する（伸長時はここだけが後ろに伸びる）
+          //  - 新endより完全に後ろになった非末尾slot（縮小で切り捨てられた分）は
+          //    0幅にして実質無効化する（candForDayのフィルタで除外される）
+          //  - それ以外（完全に範囲内の非末尾slot）はoverrideを解除して元のまま
+          setSlotOverrides((prev) => {
+            const nextOv = { ...prev };
+            for (const i of cur.idxs) {
+              const o = cur.origs[i];
+              if (!o) continue;
+              if (o.start >= next.end) {
+                nextOv[i] = {
+                  start: new Date(o.start).toISOString(),
+                  end: new Date(o.start).toISOString(),
+                };
+              } else if (i === cur.tailIdx) {
+                nextOv[i] = {
+                  start: new Date(o.start).toISOString(),
+                  end: new Date(next.end).toISOString(),
+                };
+              } else {
+                delete nextOv[i];
+              }
+            }
+            return nextOv;
+          });
         }
       };
 
@@ -862,11 +918,12 @@ export default function ProposePage() {
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onUp);
         if (!cur) return;
-        // 衝突状態で離したら元に戻す（赤枠で弾く）
+        // 衝突状態で離したら元に戻す（赤枠で弾く）。
+        // resizeは末尾slotだけでなくグループ内の複数slotを書き換えうるため、idxs全体を対象にする。
         if (cur.invalid) {
           setSlotOverrides((prev) => {
             const next = { ...prev };
-            const targetIdxs = cur.mode === 'resize' ? [cur.tailIdx] : cur.idxs;
+            const targetIdxs = cur.idxs;
             for (const i of targetIdxs) {
               const o = cur.origs[i];
               const s = slots[i];
@@ -1280,7 +1337,12 @@ export default function ProposePage() {
                     const busy = busyForDay(d.ymd);
                     const cand = candForDay(d.ymd);
                     return (
-                      <div key={d.ymd} className={`pp-cal-day ${d.outOfPeriod ? 'out-of-period' : ''}`}>
+                      <div
+                        key={d.ymd}
+                        className={`pp-cal-day ${d.outOfPeriod ? 'out-of-period' : ''}`}
+                        title={d.outOfPeriod ? undefined : 'クリックでこの時刻に候補を追加'}
+                        onClick={(e) => handleDayClick(e, d.ymd, d.outOfPeriod)}
+                      >
                         {/* 時間ガイド線 */}
                         {Array.from({ length: HOUR_END - HOUR_START }, (_, i) => i + HOUR_START).map((h) => (
                           <div key={h} className="pp-cal-day-hour" />
