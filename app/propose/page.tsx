@@ -819,6 +819,10 @@ export default function ProposePage() {
         const ov = slotOverrides[i];
         const sMs = Date.parse(ov?.start ?? s.start);
         const eMs = Date.parse(ov?.end ?? s.end);
+        // 別のリサイズ操作で0幅（縮小により無効化）になったslotは、衝突判定対象から除外する。
+        // 含めてしまうと nextBusyStart が「target.end と同時刻に始まるbusy」として誤検出し、
+        // 直後に再度そのグループを伸ばそうとしたときに常にクランプされてしまう。
+        if (eMs <= sMs) return;
         if (eMs <= dayStartMs || sMs >= dayEndMs) return;
         otherCandsSameDay.push({ start: sMs, end: eMs });
       });
