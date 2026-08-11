@@ -1,4 +1,5 @@
 /**
+ * GET /api/pages/{slug} — 予約ページの全設定を取得する（主催者本人のみ・編集画面のプリフィル用）。
  * PATCH /api/pages/{slug} — 予約ページの設定（タイトル・打合せ時間・営業時間・バッファ・直前ブロック）を
  * 更新する（主催者本人のみ・部分更新＝既存settingsにマージ）。
  */
@@ -8,6 +9,27 @@ import { ServiceError } from '@/service/errors';
 import { jsonError } from '@/service/http';
 import { assertValidSlug } from '@/service/security';
 import { requireSessionUserId } from '@/service/auth/session';
+
+export async function GET(
+  _req: Request,
+  ctx: { params: Promise<{ slug: string }> },
+): Promise<NextResponse> {
+  try {
+    const { slug } = await ctx.params;
+    if (!slug) throw new ServiceError('VALIDATION', 'slug が必要です');
+    assertValidSlug(slug);
+    const me = await requireSessionUserId();
+    const repo = getRepository();
+    const page = await repo.getPageBySlug(slug);
+    if (!page) throw new ServiceError('NOT_FOUND', `slug が見つかりません: ${slug}`);
+    if (page.organizerId !== me) {
+      throw new ServiceError('FORBIDDEN', 'このページを操作する権限がありません');
+    }
+    return NextResponse.json({ page });
+  } catch (e) {
+    return jsonError(e);
+  }
+}
 
 export async function PATCH(
   req: Request,
