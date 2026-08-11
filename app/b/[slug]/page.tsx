@@ -9,6 +9,7 @@ import '../../scheduler.css';
 import CopyLinkButton from '../../_shared/CopyLinkButton';
 import QrCodeButton from '../../_shared/QrCodeButton';
 import IcalButton from '../../_shared/IcalButton';
+import PoweredByFooter from '../../_shared/PoweredByFooter';
 
 const WEEK = ['月', '火', '水', '木', '金', '土', '日'];
 const GRID_START = 8;
@@ -380,6 +381,7 @@ export default function BookingPage({ params }: { params: Promise<{ slug: string
           </div>
         )}
       </div>
+      <PoweredByFooter />
     </div>
   );
 }

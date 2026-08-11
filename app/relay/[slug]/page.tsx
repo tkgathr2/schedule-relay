@@ -9,6 +9,7 @@ import { useParams } from 'next/navigation';
 import CopyLinkButton from './_components/CopyLinkButton';
 import QrCodeButton from './_components/QrCodeButton';
 import IcalButton from '../../_shared/IcalButton';
+import PoweredByFooter from '../../_shared/PoweredByFooter';
 import HoldsList from './_components/HoldsList';
 
 interface CandidateStage {
@@ -323,6 +324,7 @@ export default function RelayDetailPage() {
       </div>
 
       <HoldsList slug={slug} refreshKey={holdsRefreshKey} />
+      <PoweredByFooter />
     </main>
   );
 }

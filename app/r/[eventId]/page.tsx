@@ -10,6 +10,7 @@
  * 本格認証（assigneeId 検証）は後段。最小実装＝URL クエリで本人を識別する。
  */
 import { use, useCallback, useEffect, useState } from 'react';
+import PoweredByFooter from '../../_shared/PoweredByFooter';
 
 interface StepDto {
   id: string;
@@ -209,6 +210,7 @@ export default function RelayPage(props: { params: Promise<{ eventId: string }> 
           全員の確定が完了しました。
         </section>
       )}
+      <PoweredByFooter />
     </main>
   );
 }
