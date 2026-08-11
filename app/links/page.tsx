@@ -37,9 +37,12 @@ export default function LinksPage() {
       const r = await fetch('/api/pages', { cache: 'no-store' });
       if (!r.ok) throw new Error(`status ${r.status}`);
       const j = (await r.json()) as { pages: PageRow[] };
-      // 二重防御：化け文字（U+FFFD = ）を含むタイトルはDB側のレガシー破損データ
-      // なので一覧に出さない（API側 isActive=true フィルタとは別の保険）
+      // 「空き時間リンク」= 繰り返し使える T1 のみ。T2〜T6（確定型・投票型等の一回限りの調整）は
+      // /unconfirmed（未確定の調整）側に表示するのでここには出さない。
+      // あわせて、化け文字（U+FFFD = ）を含むタイトルはDB側のレガシー破損データなので一覧に出さない
+      // （API側 isActive=true フィルタとは別の保険）。
       const clean = (j.pages || []).filter((p) => {
+        if (p.type !== 'T1') return false;
         const t = (p.settings as { title?: unknown } | null | undefined)?.title;
         if (typeof t !== 'string') return true;
         return !t.includes('�');

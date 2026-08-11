@@ -21,9 +21,29 @@ type EventRow = {
   page: PageMeta;
 };
 
+// /api/pages の生レスポンス形（T2〜T6のうち、相手がまだ一度もリンクを開いておらず
+// Event が存在しないものを「送信済み・未接触」として一覧に混ぜ込むために使う）
+type PageRow = {
+  id: string;
+  type: string;
+  slug: string;
+  isActive: boolean;
+  settings: { title?: string; duration_minutes?: number; participants?: string[] } | null;
+  createdAt: number;
+};
+
 function fmtDuration(min?: number): string {
   if (!min) return '未設定';
   return `${min}分`;
+}
+
+function statusLabel(s: string): string {
+  switch (s) {
+    case 'open': return '相手が閲覧中';
+    case 'holding': return '仮押さえ中';
+    case 'pending': return '送信済み・未クリック';
+    default: return s;
+  }
 }
 
 export default function UnconfirmedPage() {
@@ -34,10 +54,35 @@ export default function UnconfirmedPage() {
 
   const load = useCallback(async () => {
     try {
-      const r = await fetch('/api/events?status=open|holding', { cache: 'no-store' });
-      if (!r.ok) throw new Error(`status ${r.status}`);
-      const j = (await r.json()) as { events: EventRow[] };
-      setEvents(j.events || []);
+      const [evRes, pgRes] = await Promise.all([
+        fetch('/api/events?status=open|holding', { cache: 'no-store' }),
+        fetch('/api/pages', { cache: 'no-store' }),
+      ]);
+      if (!evRes.ok) throw new Error(`status ${evRes.status}`);
+      const evJson = (await evRes.json()) as { events: EventRow[] };
+      const pageEvents = evJson.events || [];
+
+      // T2〜T6（確定型・投票型など一回限りの調整）は、リンクを送った直後
+      // ＝相手がまだ一度も開いておらず Event がまだ存在しない段階でも
+      // 「送信済み・未クリック」としてここに出す（社長要望：空き時間リンクではなくこちらに出したい）。
+      let pendingFromPages: EventRow[] = [];
+      if (pgRes.ok) {
+        const pgJson = (await pgRes.json()) as { pages: PageRow[] };
+        const pageIdsWithEvent = new Set(pageEvents.map((e) => e.pageId));
+        pendingFromPages = (pgJson.pages || [])
+          .filter((p) => p.type !== 'T1' && p.isActive && !pageIdsWithEvent.has(p.id))
+          .map((p) => ({
+            id: `page-${p.id}`,
+            pageId: p.id,
+            type: p.type,
+            status: 'pending',
+            createdAt: p.createdAt,
+            page: { id: p.id, slug: p.slug, organizerId: '', settings: p.settings },
+          }));
+      }
+
+      const merged = [...pageEvents, ...pendingFromPages].sort((a, b) => b.createdAt - a.createdAt);
+      setEvents(merged);
     } catch (e) {
       setErr(e instanceof Error ? e.message : '読み込みに失敗しました');
       setEvents([]);
@@ -116,7 +161,7 @@ export default function UnconfirmedPage() {
                       <td>{dur}</td>
                       <td className="cell-title">
                         {title}
-                        <span style={{ marginLeft: 8, fontSize: 11, color: '#6b7280' }}>[{e.status}]</span>
+                        <span style={{ marginLeft: 8, fontSize: 11, color: '#6b7280' }}>[{statusLabel(e.status)}]</span>
                       </td>
                       <td className="cell-muted">{participants}</td>
                       <td className="cell-actions">
