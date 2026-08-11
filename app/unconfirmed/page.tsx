@@ -82,11 +82,56 @@ function buildWorkingHoursPayload(hours: Record<DayKey, DayHours>): Record<strin
   return out;
 }
 
-function buildMessageText(row: EventRow, origin: string): string {
+const TZ = 'Asia/Tokyo';
+const CIRCLED_NUMS = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩'];
+
+function fmtSlotJa(startIso: string, endIso: string): string {
+  const s = new Date(startIso);
+  const e = new Date(endIso);
+  const md = new Intl.DateTimeFormat('ja-JP', { timeZone: TZ, month: 'numeric', day: 'numeric' }).format(s);
+  const dow = new Intl.DateTimeFormat('ja-JP', { timeZone: TZ, weekday: 'short' }).format(s);
+  const sh = s.toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
+  const eh = e.toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
+  return `${md}（${dow}） ${sh}〜${eh}`;
+}
+
+// 「テキストで送る」本文：タイトル・打合せ時間に加えて、実際の空き候補日時を具体的に列挙する。
+// 相手は①〜の番号でこのメッセージに返信して選ぶか、リンクから自分で選ぶか、どちらでも良いようにする
+// （社長要望：日程・打合せ時間を具体的にテキストで書き、テキスト返信/リンクの両方を選べるようにする）。
+async function buildMessageText(row: EventRow, origin: string): Promise<string> {
   const title = row.page?.settings?.title || '日程調整';
+  const duration = row.page?.settings?.duration_minutes;
   const slug = row.page?.slug;
   const url = slug ? `${origin}/b/${slug}` : '';
-  return [`${title} の候補です。`, '', `ご都合の良い枠を選んでご予約ください： ${url}`].join('\n');
+
+  let candidateLines: string[] = [];
+  if (slug) {
+    try {
+      const res = await fetch(`/api/pages/${slug}/availability`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = (await res.json()) as { slots?: { start: string; end: string }[] };
+        candidateLines = (data.slots || [])
+          .slice(0, 5)
+          .map((s, i) => `${CIRCLED_NUMS[i] ?? `${i + 1}.`} ${fmtSlotJa(s.start, s.end)}`);
+      }
+    } catch {
+      /* 取得失敗時は候補列挙を諦め、リンクのみの本文にフォールバック */
+    }
+  }
+
+  const lines = [`${title} の日程調整です${duration ? `（所要${duration}分）` : ''}。`, ''];
+  if (candidateLines.length > 0) {
+    lines.push(
+      '下記の候補からご都合の良い日時をお選びいただき、このメッセージに返信いただくか、',
+      'リンクから直接ご予約ください。',
+      '',
+      '【候補】',
+      ...candidateLines,
+      '',
+    );
+  }
+  lines.push('【予約リンク】', url);
+  return lines.join('\n');
 }
 
 export default function UnconfirmedPage() {
@@ -160,11 +205,13 @@ export default function UnconfirmedPage() {
     }
   };
 
-  // 「テキストで送る」：タイトル＋URLの本文をそのままクリップボードにコピーする
-  // （Slack/メールにそのまま貼り付けて送れる状態にする）。
+  // 「テキストで送る」：タイトル・打合せ時間・具体的な候補日時＋予約リンクをまとめた本文を
+  // クリップボードにコピーする（Slack/メールにそのまま貼り付けて送れる状態にする）。
   const copyMessage = async (row: EventRow) => {
+    setToast('本文を作成中…');
     try {
-      await navigator.clipboard.writeText(buildMessageText(row, window.location.origin));
+      const text = await buildMessageText(row, window.location.origin);
+      await navigator.clipboard.writeText(text);
       setToast('本文をコピーしました');
       setTimeout(() => setToast(null), 1500);
     } catch {
@@ -286,6 +333,11 @@ export default function UnconfirmedPage() {
                           onClick={() => copyMessage(e)}
                         >📋</button>
                         <button className="sc-icon-btn" title="カレンダー">📅</button>
+                        <button
+                          className="sc-icon-btn"
+                          title="編集"
+                          onClick={() => openEdit(e)}
+                        >✏️</button>
                         <div className="sc-menu-wrap" style={{ display: 'inline-block' }}>
                           <button
                             className="sc-icon-btn"
@@ -293,7 +345,6 @@ export default function UnconfirmedPage() {
                           >⋯</button>
                           {menuOpen === e.id && (
                             <div className="sc-menu" onMouseLeave={() => setMenuOpen(null)}>
-                              <button onClick={() => openEdit(e)}>編集</button>
                               <button className="danger" onClick={() => alert('キャンセル機能は別途実装')}>キャンセル</button>
                             </div>
                           )}
