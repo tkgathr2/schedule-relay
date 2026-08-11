@@ -1,7 +1,7 @@
 'use client';
 /**
  * /propose — Spirの「候補を自動抽出」相当の3カラムUI。
- * 左：設定（タイトル・調整タイプT2/T3・打合せ時間・期間・営業時間・バッファ）
+ * 左：設定（タイトル・打合せ時間・期間・営業時間・バッファ）
  * 中：予定を考慮するカレンダー（複数選択）
  * 右：Spir風 週カレンダーグリッド（既存予定=色付きブロック / 候補=青点線オーバーレイ）
  *     候補ブロッククリックで個別トグル → 「この候補を反映」で予約ページ作成
@@ -187,7 +187,6 @@ export default function ProposePage() {
       setAiLoading(false);
     }
   }, [aiContext]);
-  const [adjType, setAdjType] = useState<'T2' | 'T3'>('T2');
   const [duration, setDuration] = useState(60);
   const [periodStart, setPeriodStart] = useState(plusDaysIso(1));
   const [periodEnd, setPeriodEnd] = useState(plusDaysIso(30));
@@ -244,7 +243,6 @@ export default function ProposePage() {
       const raw = localStorage.getItem(SAVED_SETTINGS_KEY);
       if (raw) {
         const s = JSON.parse(raw) as {
-          adjType?: 'T2' | 'T3';
           duration?: number;
           weeklyHours?: Record<DayKey, DayHours>;
           bufBefore?: number;
@@ -252,7 +250,6 @@ export default function ProposePage() {
           minNotice?: number;
           maxSlots?: number;
         };
-        if (s.adjType === 'T2' || s.adjType === 'T3') setAdjType(s.adjType);
         if (typeof s.duration === 'number') setDuration(s.duration);
         if (s.weeklyHours && typeof s.weeklyHours === 'object') {
           const merged = defaultWeeklyHours();
@@ -287,7 +284,7 @@ export default function ProposePage() {
       if (saveSettings) {
         localStorage.setItem(
           SAVED_SETTINGS_KEY,
-          JSON.stringify({ adjType, duration, weeklyHours, bufBefore, bufAfter, minNotice, maxSlots }),
+          JSON.stringify({ duration, weeklyHours, bufBefore, bufAfter, minNotice, maxSlots }),
         );
       } else {
         localStorage.removeItem(SAVED_SETTINGS_KEY);
@@ -295,7 +292,7 @@ export default function ProposePage() {
     } catch {
       /* noop */
     }
-  }, [settingsLoaded, saveSettings, adjType, duration, weeklyHours, bufBefore, bufAfter, minNotice, maxSlots]);
+  }, [settingsLoaded, saveSettings, duration, weeklyHours, bufBefore, bufAfter, minNotice, maxSlots]);
 
   // カレンダー
   const [calendars, setCalendars] = useState<Calendar[]>([]);
@@ -387,7 +384,6 @@ export default function ProposePage() {
 
   // 反映結果
   const [doneUrl, setDoneUrl] = useState<string | null>(null);
-  const [doneVoteUrl, setDoneVoteUrl] = useState<string | null>(null);
   const [copyText, setCopyText] = useState('');
   const [applying, setApplying] = useState(false);
   const [applyErr, setApplyErr] = useState<string | null>(null);
@@ -536,16 +532,13 @@ export default function ProposePage() {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         // organizerId は送らない（サーバがセッションから決める）
-        body: JSON.stringify({ type: adjType, slug, settings }),
+        body: JSON.stringify({ type: 'T2', slug, settings }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error?.message || '作成に失敗しました');
       const origin = window.location.origin;
       const url = `${origin}/b/${slug}`;
       setDoneUrl(url);
-      if (adjType === 'T3') {
-        setDoneVoteUrl(`${origin}/v/${data.page?.id ?? slug}`);
-      }
       // メール本文用テキスト（ドラッグ/リサイズで動かした候補は effectiveSlots に反映済み）
       const lines = Array.from(selectedSlots)
         .sort((a, b) => a - b)
@@ -1053,12 +1046,6 @@ export default function ProposePage() {
               <input readOnly value={doneUrl} onFocus={(e) => e.currentTarget.select()} />
               <button className="sc-btn primary" style={{ flex: 'none' }} onClick={() => { navigator.clipboard.writeText(doneUrl); }}>コピー</button>
             </div>
-            {doneVoteUrl && (
-              <div className="sc-link" style={{ marginTop: 8 }}>
-                <input readOnly value={doneVoteUrl} onFocus={(e) => e.currentTarget.select()} />
-                <button className="sc-btn ghost" style={{ flex: 'none' }} onClick={() => { navigator.clipboard.writeText(doneVoteUrl); }}>投票URLをコピー</button>
-              </div>
-            )}
           </div>
 
           <div style={{ marginTop: 20, padding: 16, border: '1px solid #e5e7eb', borderRadius: 10, background: '#fafafa' }}>
@@ -1132,14 +1119,6 @@ export default function ProposePage() {
                   ))}
                 </div>
               )}
-            </div>
-
-            <div className="sc-field">
-              <label>調整タイプ</label>
-              <div className="sc-seg">
-                <button className={adjType === 'T2' ? 'on' : ''} onClick={() => setAdjType('T2')}>確定型 (T2)</button>
-                <button className={adjType === 'T3' ? 'on' : ''} onClick={() => setAdjType('T3')}>投票型 (T3)</button>
-              </div>
             </div>
 
             <div className="sc-field">

@@ -119,12 +119,11 @@ export default function Home() {
 
       <section className="section">
         <div className="wrap">
-          <h2>6つの調整タイプ（Spir全機能 ＋ リレー型）</h2>
+          <h2>調整タイプ（Spir全機能 ＋ リレー型）</h2>
           <div className="cards">
             {[
               { t: 'T1', n: '空き時間リンク', d: '空き枠をURLで共有。繰り返し使える。' },
               { t: 'T2', n: '確定型', d: '候補を選んだ瞬間に確定。' },
-              { t: 'T3', n: '投票型', d: '複数候補に投票して決定。' },
               { t: 'T4', n: 'チーム全員型', d: 'チームの共通の空きを自動抽出。' },
               { t: 'T5', n: 'チーム単数（RR）', d: '担当を負荷分散で自動割当。' },
               { t: 'T6', n: 'リレー型', d: 'A→B→C と順番に確定。独自機能。', must: true },
