@@ -138,7 +138,6 @@ export default function UnconfirmedPage() {
   const [events, setEvents] = useState<EventRow[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const [menuOpen, setMenuOpen] = useState<string | null>(null);
 
   // 編集モーダル
   const [editing, setEditing] = useState<EventRow | null>(null);
@@ -192,6 +191,24 @@ export default function UnconfirmedPage() {
     void load();
   }, [load]);
 
+  // この調整を削除する（ページを非アクティブ化＝相手のリンクも無効になる）。
+  const deletePage = async (row: EventRow) => {
+    const slug = row.page?.slug;
+    if (!slug) return;
+    const title = row.page?.settings?.title || '(無題)';
+    if (!confirm(`「${title}」を削除しますか？\n相手が持っているリンクも無効になります。`)) return;
+    try {
+      const res = await fetch(`/api/pages/${slug}/cancel`, { method: 'POST' });
+      if (!res.ok) throw new Error(`status ${res.status}`);
+      setToast('削除しました');
+      setTimeout(() => setToast(null), 1500);
+      void load();
+    } catch {
+      setToast('削除に失敗しました');
+      setTimeout(() => setToast(null), 1500);
+    }
+  };
+
   const copyLink = async (slug: string | undefined) => {
     if (!slug) return;
     const url = `${window.location.origin}/b/${slug}`;
@@ -230,7 +247,6 @@ export default function UnconfirmedPage() {
     setEditHours(parseWorkingHours(s?.working_hours));
     setEditErr(null);
     setEditing(row);
-    setMenuOpen(null);
   }
 
   async function saveEdit() {
@@ -332,23 +348,16 @@ export default function UnconfirmedPage() {
                           title="テキストで送る（本文をコピー）"
                           onClick={() => copyMessage(e)}
                         >📋</button>
-                        <button className="sc-icon-btn" title="カレンダー">📅</button>
                         <button
                           className="sc-icon-btn"
                           title="編集"
                           onClick={() => openEdit(e)}
                         >✏️</button>
-                        <div className="sc-menu-wrap" style={{ display: 'inline-block' }}>
-                          <button
-                            className="sc-icon-btn"
-                            onClick={() => setMenuOpen(menuOpen === e.id ? null : e.id)}
-                          >⋯</button>
-                          {menuOpen === e.id && (
-                            <div className="sc-menu" onMouseLeave={() => setMenuOpen(null)}>
-                              <button className="danger" onClick={() => alert('キャンセル機能は別途実装')}>キャンセル</button>
-                            </div>
-                          )}
-                        </div>
+                        <button
+                          className="sc-icon-btn"
+                          title="削除"
+                          onClick={() => deletePage(e)}
+                        >🗑️</button>
                       </td>
                     </tr>
                   );
