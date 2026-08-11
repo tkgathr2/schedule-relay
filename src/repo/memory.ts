@@ -266,6 +266,15 @@ export class MemoryRepository implements Repository {
     return page;
   }
 
+  async updatePageSettingsBySlug(slug: string, settings: unknown): Promise<BookingPageRec | null> {
+    const id = this.pagesBySlug.get(slug);
+    if (!id) return null;
+    const page = this.pages.get(id);
+    if (!page) return null;
+    page.settings = settings;
+    return page;
+  }
+
   async listAllPages(): Promise<BookingPageRec[]> {
     return [...this.pages.values()].sort((a, b) => b.createdAt - a.createdAt);
   }
