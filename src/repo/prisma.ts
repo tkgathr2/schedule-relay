@@ -443,6 +443,16 @@ export class PrismaRepository implements Repository {
     return toPageRec(updated);
   }
 
+  async updatePageSettingsBySlug(slug: string, settings: unknown): Promise<BookingPageRec | null> {
+    const existing = await this.db.bookingPage.findUnique({ where: { slug } });
+    if (!existing) return null;
+    const updated = await this.db.bookingPage.update({
+      where: { slug },
+      data: { settings: settings as Prisma.InputJsonValue },
+    });
+    return toPageRec(updated);
+  }
+
   async listAllPages(): Promise<BookingPageRec[]> {
     const rows = await this.db.bookingPage.findMany({
       orderBy: { createdAt: 'desc' },

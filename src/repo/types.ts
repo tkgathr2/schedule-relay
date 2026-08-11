@@ -185,6 +185,8 @@ export interface Repository {
   deactivatePageBySlug(slug: string): Promise<BookingPageRec | null>;
   /** ページの isActive を任意の値に更新する（admin用・active/disabled トグル）。存在しなければ null。 */
   setPageActiveBySlug(slug: string, isActive: boolean): Promise<BookingPageRec | null>;
+  /** ページの settings（タイトル・打合せ時間・営業時間等）を丸ごと更新する（主催者の編集用）。存在しなければ null。 */
+  updatePageSettingsBySlug(slug: string, settings: unknown): Promise<BookingPageRec | null>;
   /** 全主催者のページを返す（admin一覧用・createdAt 降順）。 */
   listAllPages(): Promise<BookingPageRec[]>;
   /** ページ単位の確定件数を返す（admin一覧用・pageId→件数）。 */
