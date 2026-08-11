@@ -55,33 +55,6 @@ function statusLabel(s: string): string {
   }
 }
 
-// 編集フォーム（営業時間・曜日ごと）用の型・ユーティリティ。
-// settings.working_hours は propose と同じ形 { tz, mon:[start,end]|[], ... } で保存されている。
-type DayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
-const DAY_KEYS: DayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
-const DAY_LABELS: Record<DayKey, string> = { mon: '月', tue: '火', wed: '水', thu: '木', fri: '金', sat: '土', sun: '日' };
-type DayHours = { enabled: boolean; start: string; end: string };
-
-function parseWorkingHours(wh: unknown): Record<DayKey, DayHours> {
-  const obj = wh && typeof wh === 'object' ? (wh as Record<string, unknown>) : {};
-  const out = {} as Record<DayKey, DayHours>;
-  for (const k of DAY_KEYS) {
-    const v = obj[k];
-    if (Array.isArray(v) && v.length === 2 && typeof v[0] === 'string' && typeof v[1] === 'string') {
-      out[k] = { enabled: true, start: v[0], end: v[1] };
-    } else {
-      out[k] = { enabled: false, start: '09:00', end: '18:00' };
-    }
-  }
-  return out;
-}
-
-function buildWorkingHoursPayload(hours: Record<DayKey, DayHours>): Record<string, unknown> {
-  const out: Record<string, unknown> = { tz: 'Asia/Tokyo' };
-  for (const k of DAY_KEYS) out[k] = hours[k].enabled ? [hours[k].start, hours[k].end] : [];
-  return out;
-}
-
 const TZ = 'Asia/Tokyo';
 const CIRCLED_NUMS = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩'];
 
@@ -138,17 +111,6 @@ export default function UnconfirmedPage() {
   const [events, setEvents] = useState<EventRow[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-
-  // 編集モーダル
-  const [editing, setEditing] = useState<EventRow | null>(null);
-  const [editTitle, setEditTitle] = useState('');
-  const [editDuration, setEditDuration] = useState(60);
-  const [editMinNotice, setEditMinNotice] = useState(60);
-  const [editBufBefore, setEditBufBefore] = useState(0);
-  const [editBufAfter, setEditBufAfter] = useState(10);
-  const [editHours, setEditHours] = useState<Record<DayKey, DayHours>>(() => parseWorkingHours(null));
-  const [editSaving, setEditSaving] = useState(false);
-  const [editErr, setEditErr] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -237,48 +199,6 @@ export default function UnconfirmedPage() {
     }
   };
 
-  function openEdit(row: EventRow) {
-    const s = row.page?.settings;
-    setEditTitle(s?.title || '');
-    setEditDuration(typeof s?.duration_minutes === 'number' ? s.duration_minutes : 60);
-    setEditMinNotice(typeof s?.min_notice_minutes === 'number' ? s.min_notice_minutes : 60);
-    setEditBufBefore(typeof s?.buffer_minutes?.before === 'number' ? s.buffer_minutes.before : 0);
-    setEditBufAfter(typeof s?.buffer_minutes?.after === 'number' ? s.buffer_minutes.after : 10);
-    setEditHours(parseWorkingHours(s?.working_hours));
-    setEditErr(null);
-    setEditing(row);
-  }
-
-  async function saveEdit() {
-    const slug = editing?.page?.slug;
-    if (!slug) return;
-    setEditSaving(true);
-    setEditErr(null);
-    try {
-      const res = await fetch(`/api/pages/${slug}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          title: editTitle,
-          duration_minutes: editDuration,
-          min_notice_minutes: editMinNotice,
-          buffer_minutes: { before: editBufBefore, after: editBufAfter },
-          working_hours: buildWorkingHoursPayload(editHours),
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.error?.message || '保存に失敗しました');
-      setEditing(null);
-      setToast('保存しました');
-      setTimeout(() => setToast(null), 1500);
-      void load();
-    } catch (e) {
-      setEditErr(e instanceof Error ? e.message : '保存に失敗しました');
-    } finally {
-      setEditSaving(false);
-    }
-  }
-
   return (
     <main className="sc-list-page">
       <div className="wrap">
@@ -348,11 +268,12 @@ export default function UnconfirmedPage() {
                           title="テキストで送る（本文をコピー）"
                           onClick={() => copyMessage(e)}
                         >📋</button>
-                        <button
+                        <a
                           className="sc-icon-btn"
                           title="編集"
-                          onClick={() => openEdit(e)}
-                        >✏️</button>
+                          href={e.page?.slug ? `/propose?edit=${e.page.slug}` : undefined}
+                          style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', textDecoration: 'none' }}
+                        >✏️</a>
                         <button
                           className="sc-icon-btn"
                           title="削除"
@@ -368,100 +289,6 @@ export default function UnconfirmedPage() {
         )}
       </div>
       {toast && <div className="sc-toast show">{toast}</div>}
-      {editing && (
-        <div className="pp-busy-modal-overlay" onClick={() => setEditing(null)}>
-          <div className="sc-edit-modal" onClick={(e) => e.stopPropagation()}>
-            <button
-              type="button"
-              className="pp-busy-modal-close"
-              aria-label="閉じる"
-              onClick={() => setEditing(null)}
-            >✕</button>
-            <div className="pp-busy-modal-title">調整内容を編集</div>
-
-            <div className="sc-field">
-              <label>タイトル</label>
-              <input className="sc-input" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder="日程候補" />
-            </div>
-
-            <div className="sc-field">
-              <label>打合せ時間</label>
-              <select className="sc-select" value={editDuration} onChange={(e) => setEditDuration(Number(e.target.value))}>
-                {[15, 30, 45, 60, 90, 120].map((d) => <option key={d} value={d}>{d}分</option>)}
-              </select>
-            </div>
-
-            <div className="sc-field">
-              <label>営業時間（曜日ごと）</label>
-              <div className="sc-weekly-hours">
-                {DAY_KEYS.map((k) => {
-                  const h = editHours[k];
-                  return (
-                    <div key={k} className="sc-weekly-hours-row">
-                      <label className="sc-weekly-hours-day">
-                        <input
-                          type="checkbox"
-                          checked={h.enabled}
-                          onChange={(ev) => setEditHours((prev) => ({ ...prev, [k]: { ...prev[k], enabled: ev.target.checked } }))}
-                        />
-                        {DAY_LABELS[k]}
-                      </label>
-                      <input
-                        className="sc-input"
-                        type="time"
-                        disabled={!h.enabled}
-                        value={h.start}
-                        onChange={(ev) => setEditHours((prev) => ({ ...prev, [k]: { ...prev[k], start: ev.target.value } }))}
-                      />
-                      <span className="sc-weekly-hours-sep">〜</span>
-                      <input
-                        className="sc-input"
-                        type="time"
-                        disabled={!h.enabled}
-                        value={h.end}
-                        onChange={(ev) => setEditHours((prev) => ({ ...prev, [k]: { ...prev[k], end: ev.target.value } }))}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="sc-field">
-              <label>前後の確保時間（バッファ）</label>
-              <div className="sc-row2">
-                <select className="sc-select" value={editBufBefore} onChange={(e) => setEditBufBefore(Number(e.target.value))}>
-                  {[0, 5, 10, 15, 30].map((m) => <option key={m} value={m}>前 {m}分</option>)}
-                </select>
-                <select className="sc-select" value={editBufAfter} onChange={(e) => setEditBufAfter(Number(e.target.value))}>
-                  {[0, 5, 10, 15, 30].map((m) => <option key={m} value={m}>後 {m}分</option>)}
-                </select>
-              </div>
-            </div>
-
-            <div className="sc-field">
-              <label>直前ブロック</label>
-              <select className="sc-select" value={editMinNotice} onChange={(e) => setEditMinNotice(Number(e.target.value))}>
-                <option value={0}>直前まで（無し）</option>
-                <option value={30}>30分前まで</option>
-                <option value={60}>60分前まで</option>
-                <option value={120}>2時間前まで</option>
-                <option value={240}>4時間前まで</option>
-                <option value={1440}>24時間前まで</option>
-              </select>
-            </div>
-
-            {editErr && <div className="sc-err" style={{ marginBottom: 10 }}>{editErr}</div>}
-
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button className="sc-btn primary" disabled={editSaving} onClick={saveEdit}>
-                {editSaving ? '保存中…' : '保存する'}
-              </button>
-              <button className="sc-btn ghost" onClick={() => setEditing(null)}>キャンセル</button>
-            </div>
-          </div>
-        </div>
-      )}
     </main>
   );
 }

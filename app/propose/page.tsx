@@ -232,6 +232,58 @@ export default function ProposePage() {
   }, [cutoffMode]);
   const [maxSlots, setMaxSlots] = useState(50);
 
+  // 編集モード：/unconfirmed の✏️から /propose?edit={slug} で開かれた場合、
+  // 元々作った時と同じこの画面で、既存ページの設定を丸ごと編集できるようにする
+  // （社長要望：編集は専用モーダルではなく、作成時と同じ画面に遷移して全部編集できるように）。
+  const [editSlug, setEditSlug] = useState<string | null>(null);
+  const [editLoaded, setEditLoaded] = useState(false);
+  const [editLoadErr, setEditLoadErr] = useState<string | null>(null);
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    const slug = sp.get('edit');
+    if (!slug) {
+      setEditLoaded(true);
+      return;
+    }
+    setEditSlug(slug);
+    (async () => {
+      try {
+        const res = await fetch(`/api/pages/${slug}`);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data?.error?.message || '読み込みに失敗しました');
+        const s = (data.page?.settings ?? {}) as Record<string, unknown>;
+        if (typeof s.title === 'string') setTitle(s.title);
+        if (typeof s.duration_minutes === 'number') setDuration(s.duration_minutes);
+        if (typeof s.min_notice_minutes === 'number') {
+          setCutoffMode('minutes');
+          setMinNotice(s.min_notice_minutes);
+        }
+        const buf = s.buffer_minutes as { before?: number; after?: number } | undefined;
+        if (buf) {
+          if (typeof buf.before === 'number') setBufBefore(buf.before);
+          if (typeof buf.after === 'number') setBufAfter(buf.after);
+        }
+        const wh = s.working_hours as Record<string, unknown> | undefined;
+        if (wh) {
+          const merged = defaultWeeklyHours();
+          for (const k of DAY_KEYS) {
+            const v = wh[k];
+            if (Array.isArray(v) && v.length === 2 && typeof v[0] === 'string' && typeof v[1] === 'string') {
+              merged[k] = { enabled: true, start: v[0], end: v[1] };
+            } else {
+              merged[k] = { enabled: false, start: '09:00', end: '18:00' };
+            }
+          }
+          setWeeklyHours(merged);
+        }
+      } catch (e) {
+        setEditLoadErr(e instanceof Error ? e.message : '読み込みに失敗しました');
+      } finally {
+        setEditLoaded(true);
+      }
+    })();
+  }, []);
+
   // 「今回の設定を保存する」チェックボックス：ON時は下記フォーム設定一式を localStorage に保存し、
   // 次回このページを開いたときに自動復元する（社長要望「毎回設定するのがめんどくさい」）。
   // 期間・タイトルは開くたびに変わるものなので保存対象から外す。
@@ -280,6 +332,7 @@ export default function ProposePage() {
   }, []);
   useEffect(() => {
     if (!settingsLoaded) return; // 復元処理が終わる前に「未保存状態」で上書きしてしまうのを防ぐ
+    if (editSlug) return; // 編集モードでは、編集対象の設定値でテンプレート保存を上書きしない
     try {
       if (saveSettings) {
         localStorage.setItem(
@@ -292,7 +345,7 @@ export default function ProposePage() {
     } catch {
       /* noop */
     }
-  }, [settingsLoaded, saveSettings, duration, weeklyHours, bufBefore, bufAfter, minNotice, maxSlots]);
+  }, [settingsLoaded, saveSettings, editSlug, duration, weeklyHours, bufBefore, bufAfter, minNotice, maxSlots]);
 
   // カレンダー
   const [calendars, setCalendars] = useState<Calendar[]>([]);
@@ -445,7 +498,7 @@ export default function ProposePage() {
   // debounce 400ms で連続変更時の過剰APIコールを抑制。
   // extracting中・loadingCals中・canExtract不可・カレンダー連携無効時は何もしない。
   useEffect(() => {
-    if (loadingCals || extracting || !canExtract) return;
+    if (!editLoaded || loadingCals || extracting || !canExtract) return;
     const t = setTimeout(() => {
       // 最新の extract を呼ぶ（依存配列で関数参照は最新が保証される）
       extract();
@@ -453,7 +506,7 @@ export default function ProposePage() {
     return () => clearTimeout(t);
     // 設定変更で自動再抽出する依存。selectedCals は Set なのでサイズと内容で監視
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadingCals, periodStart, periodEnd, duration, weeklyHours, bufBefore, bufAfter, minNotice, maxSlots, selectedCals, cutoffMode]);
+  }, [editLoaded, loadingCals, periodStart, periodEnd, duration, weeklyHours, bufBefore, bufAfter, minNotice, maxSlots, selectedCals, cutoffMode]);
 
   // カレンダーID → 色 マップ
   const calColorMap = useMemo(() => {
@@ -517,6 +570,24 @@ export default function ProposePage() {
     setApplyErr(null);
     setApplying(true);
     try {
+      if (editSlug) {
+        // 編集モード：既存ページの設定を更新するだけ（新規リンクは作らない・slugも変わらない）。
+        const res = await fetch(`/api/pages/${editSlug}`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            title: title.trim() || '日程候補',
+            duration_minutes: duration,
+            min_notice_minutes: minNotice,
+            buffer_minutes: { before: bufBefore, after: bufAfter },
+            working_hours: buildWorkingHoursPayload(),
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data?.error?.message || '保存に失敗しました');
+        setDoneUrl(`${window.location.origin}/b/${editSlug}`);
+        return;
+      }
       const slug = randSlug();
       const settings = {
         title: (title.trim() || '日程候補'),
@@ -577,7 +648,7 @@ export default function ProposePage() {
         );
       } catch { /* noop */ }
     } catch (e) {
-      setApplyErr(e instanceof Error ? e.message : '作成に失敗しました');
+      setApplyErr(e instanceof Error ? e.message : (editSlug ? '保存に失敗しました' : '作成に失敗しました'));
     } finally {
       setApplying(false);
     }
@@ -1034,37 +1105,47 @@ export default function ProposePage() {
       <div className="sc-topbar">
         <div className="sc-logo"><span className="mk">📅</span>スケ調くん</div>
         <div className="sc-spacer" />
-        <span className="sc-pill">候補を自動抽出</span>
+        <span className="sc-pill">{editSlug ? '調整内容を編集' : '候補を自動抽出'}</span>
       </div>
 
       {doneUrl ? (
         <div style={{ maxWidth: 720, margin: '40px auto', padding: 20 }}>
           <div className="sc-done">
-            <h3 style={{ margin: '0 0 8px' }}>✅ 候補を反映しました</h3>
-            <p style={{ margin: 0, fontSize: 13 }}>このURLを相手に送るだけ。相手は空いている枠を選ぶだけで日程が決まります。</p>
+            <h3 style={{ margin: '0 0 8px' }}>{editSlug ? '✅ 更新しました' : '✅ 候補を反映しました'}</h3>
+            <p style={{ margin: 0, fontSize: 13 }}>
+              {editSlug
+                ? '設定を更新しました。相手に配ったリンクは変わりません。'
+                : 'このURLを相手に送るだけ。相手は空いている枠を選ぶだけで日程が決まります。'}
+            </p>
             <div className="sc-link">
               <input readOnly value={doneUrl} onFocus={(e) => e.currentTarget.select()} />
               <button className="sc-btn primary" style={{ flex: 'none' }} onClick={() => { navigator.clipboard.writeText(doneUrl); }}>コピー</button>
             </div>
           </div>
 
-          <div style={{ marginTop: 20, padding: 16, border: '1px solid #e5e7eb', borderRadius: 10, background: '#fafafa' }}>
-            <h4 style={{ margin: '0 0 8px', fontSize: 14 }}>メール本文用テキスト</h4>
-            <textarea
-              readOnly
-              value={copyText}
-              rows={Math.min(20, Math.max(5, copyText.split('\n').length + 1))}
-              style={{ width: '100%', fontFamily: 'monospace', fontSize: 13, padding: 10, border: '1px solid #d1d5db', borderRadius: 8, background: '#fff', boxSizing: 'border-box', resize: 'vertical' }}
-              onFocus={(e) => e.currentTarget.select()}
-            />
-            <div style={{ marginTop: 8 }}>
-              <button className="sc-btn primary" onClick={() => navigator.clipboard.writeText(copyText)}>テキストをコピー</button>
+          {!editSlug && (
+            <div style={{ marginTop: 20, padding: 16, border: '1px solid #e5e7eb', borderRadius: 10, background: '#fafafa' }}>
+              <h4 style={{ margin: '0 0 8px', fontSize: 14 }}>メール本文用テキスト</h4>
+              <textarea
+                readOnly
+                value={copyText}
+                rows={Math.min(20, Math.max(5, copyText.split('\n').length + 1))}
+                style={{ width: '100%', fontFamily: 'monospace', fontSize: 13, padding: 10, border: '1px solid #d1d5db', borderRadius: 8, background: '#fff', boxSizing: 'border-box', resize: 'vertical' }}
+                onFocus={(e) => e.currentTarget.select()}
+              />
+              <div style={{ marginTop: 8 }}>
+                <button className="sc-btn primary" onClick={() => navigator.clipboard.writeText(copyText)}>テキストをコピー</button>
+              </div>
             </div>
-          </div>
+          )}
 
           <div style={{ marginTop: 16, display: 'flex', gap: 10 }}>
             <a className="sc-btn primary" style={{ textDecoration: 'none', display: 'inline-block' }} href={doneUrl}>予約ページを開く</a>
-            <a className="sc-btn ghost" style={{ textDecoration: 'none', display: 'inline-block' }} href="/propose" onClick={() => location.reload()}>もう1回抽出する</a>
+            {editSlug ? (
+              <a className="sc-btn ghost" style={{ textDecoration: 'none', display: 'inline-block' }} href="/unconfirmed">未確定の調整に戻る</a>
+            ) : (
+              <a className="sc-btn ghost" style={{ textDecoration: 'none', display: 'inline-block' }} href="/propose" onClick={() => location.reload()}>もう1回抽出する</a>
+            )}
           </div>
         </div>
       ) : (
@@ -1074,15 +1155,22 @@ export default function ProposePage() {
             {leftCollapsed ? (
               <button className="pp-collapse-bar" title="設定を開く" onClick={() => setLeftCollapsed(false)}>
                 <span className="pp-collapse-icon">›</span>
-                <span className="pp-collapse-label">候補を自動抽出</span>
+                <span className="pp-collapse-label">{editSlug ? '調整内容を編集' : '候補を自動抽出'}</span>
               </button>
             ) : (
               <>
             <div className="pp-pane-header">
-              <h2 style={{ margin: 0 }}>候補を自動抽出</h2>
+              <h2 style={{ margin: 0 }}>{editSlug ? '調整内容を編集' : '候補を自動抽出'}</h2>
               <button className="pp-collapse-btn" title="閉じる" onClick={() => setLeftCollapsed(true)}>‹</button>
             </div>
-            <p className="lead">期間と打合せ時間を指定すると、あなたのカレンダーの空きから候補を自動で抽出します。</p>
+            {editLoadErr && (
+              <div className="sc-err" style={{ marginBottom: 10 }}>読み込みエラー：{editLoadErr}</div>
+            )}
+            <p className="lead">
+              {editSlug
+                ? 'タイトル・打合せ時間・営業時間などを変更して保存してください。'
+                : '期間と打合せ時間を指定すると、あなたのカレンダーの空きから候補を自動で抽出します。'}
+            </p>
 
             <div className="sc-field">
               <label>タイトル<span className="opt">（任意）</span></label>
@@ -1441,19 +1529,21 @@ export default function ProposePage() {
                 <span className="lg"><span className="sq out" />期間外</span>
               </div>
 
-              {slots.length === 0 ? (
+              {slots.length === 0 && !editSlug ? (
                 <div style={{ marginTop: 12, fontSize: 13, color: '#6b7280', padding: 12, background: '#fafafa', borderRadius: 8 }}>
                   「候補を自動抽出」を押すと、ここに候補がカレンダー上に表示されます。
                 </div>
               ) : (
                 <div className="pp-cal-footer">
-                  <div className="pp-cal-summary">反映する候補: {selectedSlots.size} / {slots.length} 件</div>
+                  {!editSlug && (
+                    <div className="pp-cal-summary">反映する候補: {selectedSlots.size} / {slots.length} 件</div>
+                  )}
                   <button
                     className="sc-btn primary"
-                    disabled={selectedSlots.size === 0 || applying}
+                    disabled={applying || (!editSlug && selectedSlots.size === 0)}
                     onClick={applySelected}
                   >
-                    {applying ? '反映中…' : 'この候補を反映'}
+                    {applying ? (editSlug ? '保存中…' : '反映中…') : (editSlug ? '変更を保存する' : 'この候補を反映')}
                   </button>
                 </div>
               )}
