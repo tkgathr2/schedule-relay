@@ -599,11 +599,18 @@ export default function ProposePage() {
         buffer_minutes: { before: bufBefore, after: bufAfter },
         working_hours: buildWorkingHoursPayload(),
       };
+      // 選んだ候補（ドラッグ/リサイズで動かした分は effectiveSlots に反映済み）。
+      // サーバ側でこの候補すべてに自分用の仮押さえ（[調整中]・灰色）を即座に作る
+      // （社長要望：仮押さえ＝リンクを発行した時点で自分の枠を抑える）。
+      const candidates = Array.from(selectedSlots)
+        .sort((a, b) => a - b)
+        .map((i) => effectiveSlots[i])
+        .filter((s): s is SlotDto => !!s);
       const res = await fetch('/api/pages', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         // organizerId は送らない（サーバがセッションから決める）
-        body: JSON.stringify({ type: 'T2', slug, settings }),
+        body: JSON.stringify({ type: 'T2', slug, settings, candidates }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error?.message || '作成に失敗しました');

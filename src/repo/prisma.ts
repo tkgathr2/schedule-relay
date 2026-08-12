@@ -487,6 +487,13 @@ export class PrismaRepository implements Repository {
     return rows.map((h) => ({ start: toMs(h.startAt), end: toMs(h.endAt) }));
   }
 
+  async listActiveHoldsByEvent(eventId: string, now: number): Promise<HoldRec[]> {
+    const rows = await this.db.hold.findMany({
+      where: { eventId, status: 'active', expiresAt: { gt: toDate(now) } },
+    });
+    return rows.map(toHoldRec);
+  }
+
   // ---------- T3 投票型 ----------
   async addCandidate(eventId: string, slot: Slot): Promise<CandidateRec> {
     return this.upsertCandidate(eventId, slot);

@@ -4,9 +4,10 @@
  */
 import { NextResponse } from 'next/server';
 import { getRepository } from '@/repo/index';
-import { liveAvailabilityForPage, resolveSettings } from '@/service/booking';
+import { liveAvailabilityForPage, listSelfHoldSlotsForPage, resolveSettings } from '@/service/booking';
 import { googleFreeBusy } from '@/service/calendar/google';
 import { googleConfigForUserId } from '@/service/calendar/tenant';
+import { subtract } from '@/domain/grid';
 import { ServiceError } from '@/service/errors';
 import { jsonError, slotToDto } from '@/service/http';
 import { assertValidSlug } from '@/service/security';
@@ -41,6 +42,14 @@ export async function GET(
     const gcfg = await googleConfigForUserId(page.organizerId);
     if (gcfg) {
       externalBusy = await googleFreeBusy(gcfg, now, now + cfg.horizonDays * DAY_MS);
+    }
+
+    // このページ自身が「仮押さえ」として提示中の候補（リンク発行時に張った自分用仮押さえ）は、
+    // 外部カレンダーfreebusy上は busy に見えてしまうため、自分自身の空き算出からは除外する
+    // （＝自分が提示した候補が、自分の仮押さえのせいで空きから消えるのを防ぐ）。
+    const selfHoldSlots = await listSelfHoldSlotsForPage(repo, page, now);
+    if (selfHoldSlots.length > 0) {
+      externalBusy = subtract(externalBusy, selfHoldSlots);
     }
 
     const slots = (await liveAvailabilityForPage(repo, page, now, externalBusy)).map(slotToDto);

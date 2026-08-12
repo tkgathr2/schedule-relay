@@ -199,6 +199,13 @@ export interface Repository {
    */
   listBlockingIntervals(resourceId: string, now: EpochMs): Promise<Interval[]>;
 
+  /**
+   * 指定イベントの active な Hold 一覧を返す（有効期限切れは含まない・now基準）。
+   * リンク発行時に候補全部へ張った「自分用の仮押さえ」を、確定/取消時にまとめて
+   * 解放するための列挙に使う。
+   */
+  listActiveHoldsByEvent(eventId: string, now: EpochMs): Promise<HoldRec[]>;
+
   // ---------- T3 投票型 ----------
   /**
    * 投票用候補を追加（無ければ作る）。同一 (eventId, slot) は再利用＝upsertCandidate と同じ正規化。

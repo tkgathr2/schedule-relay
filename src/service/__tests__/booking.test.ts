@@ -8,6 +8,9 @@ import {
   confirmHold,
   releaseHeldSlot,
   resolveSettings,
+  createSelfHoldsForPage,
+  releaseAllSelfHoldsForPage,
+  listSelfHoldSlotsForPage,
 } from '../booking.js';
 import { ServiceError, type ServiceErrorCode } from '../errors.js';
 import { expandWorkingWindows } from '../../domain/working-hours.js';
@@ -345,6 +348,79 @@ describe('releaseHeldSlot（相手が別の枠に選び直したときの明示�
 
   it('存在しないholdIdを渡しても例外にならない（冪等・二重解放安全）', async () => {
     await expect(releaseHeldSlot(repo, 'nonexistent', 'guest-1')).resolves.toBeUndefined();
+  });
+});
+
+describe('自分用の仮押さえ（社長要望：リンク発行時点で自分の候補枠を抑える）', () => {
+  let repo: MemoryRepository;
+  beforeEach(() => {
+    repo = new MemoryRepository();
+  });
+
+  it('候補を反映すると、選んだ候補すべてに自分用の active Hold が作られる', async () => {
+    const page = await makePage(repo);
+    await createSelfHoldsForPage(repo, page, [SLOT_10, SLOT_11], NOW);
+    const slots = await listSelfHoldSlotsForPage(repo, page, NOW);
+    expect(slots).toHaveLength(2);
+    expect(slots).toContainEqual(SLOT_10);
+    expect(slots).toContainEqual(SLOT_11);
+  });
+
+  it('自分用の仮押さえがあっても、相手は同じ枠を実際に仮押さえできる（CONFLICT_HOLDにならない）', async () => {
+    const page = await makePage(repo);
+    await createSelfHoldsForPage(repo, page, [SLOT_10], NOW);
+
+    const { event } = await createEventForPage(repo, page.slug, 'self-1');
+    const { hold } = await holdSlot(repo, event.id, SLOT_10, 'guest-1', NOW);
+    expect(hold.status).toBe('active');
+  });
+
+  it('相手が実際にその枠を仮押さえすると、同じ枠の自分用仮押さえは解除される（重複表示防止）', async () => {
+    const page = await makePage(repo);
+    await createSelfHoldsForPage(repo, page, [SLOT_10, SLOT_11], NOW);
+    expect(await listSelfHoldSlotsForPage(repo, page, NOW)).toHaveLength(2);
+
+    const { event } = await createEventForPage(repo, page.slug, 'self-2');
+    await holdSlot(repo, event.id, SLOT_10, 'guest-1', NOW);
+
+    const remaining = await listSelfHoldSlotsForPage(repo, page, NOW);
+    expect(remaining).toEqual([SLOT_11]); // SLOT_10 の自分用仮押さえだけ消える
+  });
+
+  it('相手が確定すると、残っていた自分用仮押さえは全部解除される', async () => {
+    const page = await makePage(repo);
+    await createSelfHoldsForPage(repo, page, [SLOT_10, SLOT_11], NOW);
+
+    const { event } = await createEventForPage(repo, page.slug, 'self-3');
+    const { hold } = await holdSlot(repo, event.id, SLOT_10, 'guest-1', NOW);
+    // 確定前：SLOT_10 の自分用仮押さえは解除済み・SLOT_11 はまだ残っている
+    expect(await listSelfHoldSlotsForPage(repo, page, NOW)).toEqual([SLOT_11]);
+
+    await confirmHold(repo, hold.id, 'guest-1', null, NOW + MIN);
+    expect(await listSelfHoldSlotsForPage(repo, page, NOW)).toEqual([]);
+  });
+
+  it('ページを取消（cancel相当）すると、残っている自分用仮押さえを releaseAllSelfHoldsForPage で全部解除できる', async () => {
+    const page = await makePage(repo);
+    await createSelfHoldsForPage(repo, page, [SLOT_10, SLOT_11], NOW);
+    expect(await listSelfHoldSlotsForPage(repo, page, NOW)).toHaveLength(2);
+
+    await releaseAllSelfHoldsForPage(repo, page, NOW);
+    expect(await listSelfHoldSlotsForPage(repo, page, NOW)).toEqual([]);
+  });
+
+  it('自分用仮押さえは /api/events の「未確定の調整」対象にならない（idempotencyKeyがself:で始まる）', async () => {
+    const page = await makePage(repo);
+    await createSelfHoldsForPage(repo, page, [SLOT_10], NOW);
+    const events = await repo.listEventsByStatus(['open', 'holding', 'draft']);
+    const selfEvents = events.filter((e) => e.pageId === page.id);
+    expect(selfEvents.every((e) => e.idempotencyKey?.startsWith('self:'))).toBe(true);
+  });
+
+  it('候補が空なら何も作らない', async () => {
+    const page = await makePage(repo);
+    await createSelfHoldsForPage(repo, page, [], NOW);
+    expect(await listSelfHoldSlotsForPage(repo, page, NOW)).toEqual([]);
   });
 });
 
