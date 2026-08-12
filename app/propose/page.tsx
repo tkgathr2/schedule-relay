@@ -445,6 +445,8 @@ export default function ProposePage() {
   const [copyText, setCopyText] = useState('');
   const [applying, setApplying] = useState(false);
   const [applyErr, setApplyErr] = useState<string | null>(null);
+  // 実際に自分用仮押さえを作った件数・日数（成功画面での正確な件数表示用）。
+  const [selfHoldSummary, setSelfHoldSummary] = useState<{ count: number; days: number } | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -607,13 +609,25 @@ export default function ProposePage() {
       // 選んだ候補（ドラッグ/リサイズで動かした分は effectiveSlots に反映済み）。
       // サーバ側でこの候補すべてに自分用の仮押さえ（[調整中]・灰色）を即座に作る
       // （社長要望：仮押さえ＝リンクを発行した時点で自分の枠を抑える）。
-      // 平日日中が埋まる事故を防ぐため、実際に仮押さえする件数は先頭から上限までに絞る
+      // 平日日中が埋まる事故を防ぐため、実際に仮押さえする件数は上限までに絞る。
+      // 単純に時系列の先頭からN件だと、密集している最初の1〜2日だけに仮押さえが集中し、
+      // それ以降の候補日には一切仮押さえが入らなくなる（社長指摘：13〜16日に入らない問題）。
+      // そのため「候補がある日ごとに代表1件」を選び、日をまたいで広く抑えるようにする
       // （相手に提示する候補自体は制限しない・あくまでカレンダー上のブロック数だけ絞る）。
-      const candidates = Array.from(selectedSlots)
+      const sortedCandidateSlots = Array.from(selectedSlots)
         .sort((a, b) => a - b)
         .map((i) => effectiveSlots[i])
-        .filter((s): s is SlotDto => !!s)
-        .slice(0, MAX_SELF_HOLD_CANDIDATES);
+        .filter((s): s is SlotDto => !!s);
+      const seenDays = new Set<string>();
+      const candidates: SlotDto[] = [];
+      for (const s of sortedCandidateSlots) {
+        const ymd = msToJstYmd(Date.parse(s.start));
+        if (seenDays.has(ymd)) continue;
+        seenDays.add(ymd);
+        candidates.push(s);
+        if (candidates.length >= MAX_SELF_HOLD_CANDIDATES) break;
+      }
+      setSelfHoldSummary({ count: candidates.length, days: seenDays.size });
       const res = await fetch('/api/pages', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -1132,10 +1146,10 @@ export default function ProposePage() {
                 ? '設定を更新しました。相手に配ったリンクは変わりません。'
                 : 'このURLを相手に送るだけ。相手は空いている枠を選ぶだけで日程が決まります。'}
             </p>
-            {!editSlug && selectedSlots.size > 0 && (
+            {!editSlug && selfHoldSummary && selfHoldSummary.count > 0 && (
               <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--sc-sub)' }}>
-                候補のうち先頭{Math.min(selectedSlots.size, MAX_SELF_HOLD_CANDIDATES)}件をあなたのGoogleカレンダーに仮押さえ（灰色）として反映しました。
-                {selectedSlots.size > MAX_SELF_HOLD_CANDIDATES && '（カレンダーが埋まりすぎないよう、残りは仮押さえしていません）'}
+                候補がある{selfHoldSummary.days}日それぞれ1件ずつ、計{selfHoldSummary.count}件をあなたのGoogleカレンダーに仮押さえ（灰色）として反映しました。
+                {selectedSlots.size > selfHoldSummary.count && '（カレンダーが埋まりすぎないよう、同じ日の他の候補・上限を超えた日は仮押さえしていません）'}
               </p>
             )}
             <div className="sc-link">
