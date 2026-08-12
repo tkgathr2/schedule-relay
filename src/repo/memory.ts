@@ -300,6 +300,14 @@ export class MemoryRepository implements Repository {
     return out;
   }
 
+  async listActiveHoldsByEvent(eventId: string, now: number): Promise<HoldRec[]> {
+    const out: HoldRec[] = [];
+    for (const h of this.holds.values()) {
+      if (h.eventId === eventId && h.status === 'active' && h.expiresAt > now) out.push(h);
+    }
+    return out;
+  }
+
   // ---------- T3 投票型 ----------
   async addCandidate(eventId: string, slot: Slot): Promise<CandidateRec> {
     // 同一 (eventId, slot) は upsertCandidate と同じく再利用＝重複候補を作らない。

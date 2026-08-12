@@ -187,6 +187,148 @@ function pageTitle(page: BookingPageRec): string {
 }
 
 /**
+ * リンク発行時に候補全部へ張る「自分用の仮押さえ」（社長要望：仮押さえ＝リンクを発行した
+ * 瞬間から主催者本人の枠を抑える、の意）。
+ *
+ * 実運用フロー：
+ *  - /propose で候補を選んで反映した瞬間、選んだ候補すべてに主催者カレンダー上で
+ *    [調整中] の仮予定を作る（createSelfHoldsForPage）。
+ *  - 相手が実際にどれか1枠を選んだ瞬間（holdSlot）、その枠の自分用仮押さえは
+ *    重複表示を避けるため解除する（releaseSelfHoldForSlot）。
+ *  - 相手が確定した瞬間（confirmHold）／主催者がページを取り消した瞬間、
+ *    残っている自分用仮押さえを全部解除する（releaseAllSelfHoldsForPage）。
+ *
+ * 自分用仮押さえは resourceId を "self:{pageId}" という別名前空間にすることで、
+ * 相手の実際の仮押さえ（resourceId=organizerId）と物理的な二重予約防止（EXCLUDE制約）を
+ * 衝突させない。相手が同じ枠を選んだ瞬間は releaseSelfHoldForSlot で明示的に道を譲る。
+ */
+const SELF_HOLD_HOLDER_ID = 'organizer-self';
+const SELF_HOLD_TTL_MIN = 180 * 24 * 60; // 180日＝TTLで自然失効させず、確定/取消で明示的に片付ける前提
+
+function selfEventIdempotencyKey(pageId: string): string {
+  return `self:${pageId}`;
+}
+function selfHoldResourceId(pageId: string): string {
+  return `self:${pageId}`;
+}
+
+async function getOrCreateSelfEvent(repo: Repository, page: BookingPageRec): Promise<EventRec> {
+  const { event } = await repo.createEvent({
+    pageId: page.id,
+    type: page.type,
+    idempotencyKey: selfEventIdempotencyKey(page.id),
+  });
+  return event;
+}
+
+async function releaseSelfHold(repo: Repository, page: BookingPageRec, hold: HoldRec): Promise<void> {
+  await repo.releaseHold(hold.id);
+  if (!hold.googleEventId) return;
+  try {
+    const gcfg = await googleConfigForUserId(page.organizerId);
+    if (gcfg) await deleteCalendarEvent(gcfg, hold.googleEventId);
+  } catch {
+    /* degrade-safe */
+  }
+}
+
+/** リンク発行（候補反映）時：選んだ候補すべてに自分用の仮押さえを作る。degrade-safe。 */
+export async function createSelfHoldsForPage(
+  repo: Repository,
+  page: BookingPageRec,
+  slots: readonly Slot[],
+  now: number,
+): Promise<void> {
+  if (slots.length === 0) return;
+  const selfEvent = await getOrCreateSelfEvent(repo, page);
+  const resourceId = selfHoldResourceId(page.id);
+  const expiresAt = now + SELF_HOLD_TTL_MIN * MINUTE_MS;
+  const gcfg = await googleConfigForUserId(page.organizerId);
+
+  for (const slot of slots) {
+    let hold: HoldRec;
+    try {
+      const candidate = await repo.upsertCandidate(selfEvent.id, slot);
+      const result = await repo.createActiveHold({
+        eventId: selfEvent.id,
+        candidateId: candidate.id,
+        resourceId,
+        holderId: SELF_HOLD_HOLDER_ID,
+        slot,
+        expiresAt,
+        now,
+      });
+      hold = result.hold;
+    } catch (e) {
+      if (e instanceof ConflictHoldError) continue; // 選んだ候補同士が重複 → スキップ
+      throw e;
+    }
+
+    if (!gcfg) continue;
+    try {
+      const googleEventId = await createHoldPlaceholderEvent(gcfg, {
+        summary: `[調整中] ${pageTitle(page)}`,
+        description:
+          'この日時を候補として相手に提示中です。相手が確定するとこの予定は自動的に正式な予定に置き換わります（他の候補は確定時に自動で解除されます）。',
+        startMs: slot.start,
+        endMs: slot.end,
+      });
+      if (googleEventId) await repo.attachHoldGoogleEventId(hold.id, googleEventId);
+    } catch {
+      /* degrade-safe：カレンダー連携の失敗は仮押さえの成立に影響させない */
+    }
+  }
+}
+
+/** 相手が実際にその枠を選んだ瞬間：重複表示を避けるため、同じ枠の自分用仮押さえだけ解除する。degrade-safe。 */
+export async function releaseSelfHoldForSlot(
+  repo: Repository,
+  page: BookingPageRec,
+  slot: Slot,
+  now: number,
+): Promise<void> {
+  try {
+    const selfEvent = await getOrCreateSelfEvent(repo, page);
+    const holds = await repo.listActiveHoldsByEvent(selfEvent.id, now);
+    const match = holds.find((h) => h.start === slot.start && h.end === slot.end);
+    if (match) await releaseSelfHold(repo, page, match);
+  } catch {
+    /* degrade-safe */
+  }
+}
+
+/**
+ * このページ自身の「自分用仮押さえ」が今どの区間を占めているかを返す。
+ * /api/pages/{slug}/availability が、外部カレンダーfreebusyから自分自身の仮押さえ分を
+ * 除外する（＝自分が提示した候補が自分自身の仮押さえのせいで空きから消えないようにする）ために使う。
+ * degrade-safe：取得に失敗したら空配列（＝除外なし＝安全側）を返す。
+ */
+export async function listSelfHoldSlotsForPage(
+  repo: Repository,
+  page: BookingPageRec,
+  now: number,
+): Promise<Interval[]> {
+  try {
+    const selfEvent = await getOrCreateSelfEvent(repo, page);
+    const holds = await repo.listActiveHoldsByEvent(selfEvent.id, now);
+    return holds.map((h) => ({ start: h.start, end: h.end }));
+  } catch {
+    return [];
+  }
+}
+
+/** 確定／取消時：残っている自分用仮押さえを全部解除する。degrade-safe。 */
+export async function releaseAllSelfHoldsForPage(repo: Repository, page: BookingPageRec, now: number): Promise<void> {
+  try {
+    const selfEvent = await getOrCreateSelfEvent(repo, page);
+    const holds = await repo.listActiveHoldsByEvent(selfEvent.id, now);
+    for (const h of holds) await releaseSelfHold(repo, page, h);
+  } catch {
+    /* degrade-safe */
+  }
+}
+
+/**
  * 枠を Hold（§14 POST /events/{id}/holds）。resourceId は主催者枠（1:1）。
  *
  * 相手が仮押さえした瞬間、主催者の Google カレンダーにも「[調整中]」という一時的な予定を
@@ -252,6 +394,10 @@ export async function holdSlot(
     /* degrade-safe：カレンダー連携の失敗は仮押さえの成立に影響させない */
   }
 
+  // 相手が実際にこの枠を選んだので、リンク発行時に張っておいた「自分用の仮押さえ」
+  // （この枠ぶん）は重複表示になるため解除する（degrade-safe・releaseSelfHoldForSlot内部で保護済み）。
+  await releaseSelfHoldForSlot(repo, page, slot, now);
+
   return { hold, expiresAt };
 }
 
@@ -307,9 +453,10 @@ export async function confirmHold(
     throw new ServiceError('EXPIRED', 'この枠は確定できません（期限切れ、または他の確定により解放済み）');
   }
 
+  let page: BookingPageRec | null = null;
   try {
     const ev = await repo.getEvent(hold.eventId);
-    const page = ev ? await repo.getPageById(ev.pageId) : null;
+    page = ev ? await repo.getPageById(ev.pageId) : null;
     const gcfg = page ? await googleConfigForUserId(page.organizerId) : null;
     if (gcfg) {
       const toDelete = [result.confirmedHoldGoogleEventId, ...result.releasedGoogleEventIds].filter(
@@ -322,6 +469,10 @@ export async function confirmHold(
   } catch {
     /* degrade-safe */
   }
+
+  // 確定したので、リンク発行時に張った「自分用の仮押さえ」のうち残り（選ばれなかった候補）を
+  // 全部解除する（degrade-safe・releaseAllSelfHoldsForPage内部で保護済み）。
+  if (page) await releaseAllSelfHoldsForPage(repo, page, now);
 
   return result.confirmation;
 }

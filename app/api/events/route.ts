@@ -53,6 +53,9 @@ export async function GET(req: Request): Promise<NextResponse> {
       }
     }
     const enriched = events
+      // 自分用の仮押さえ専用イベント（リンク発行時に候補全部へ張るもの・idempotencyKey="self:{pageId}"）は
+      // 相手とのやり取りではないため「未確定の調整」一覧には出さない。
+      .filter((e) => !e.idempotencyKey?.startsWith('self:'))
       .filter((e) => pageMap.get(e.pageId)?.organizerId === organizerId)
       .map((e) => ({
         ...e,
