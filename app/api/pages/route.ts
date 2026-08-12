@@ -21,6 +21,13 @@ import { createSelfHoldsForPage } from '@/service/booking';
 
 const VALID_TYPES: AdjustmentType[] = ['T1', 'T2', 'T3', 'T4', 'T5', 'T6'];
 
+// 自分用仮押さえの候補数の上限（社長の実運用事故を受けて追加・2026-08-12）。
+// /propose は既定で候補を最大50件まで自動抽出・全選択するため、上限なしで全部を
+// 主催者カレンダーに仮押さえすると、平日日中がほぼ全部[調整中]で埋まってしまう。
+// リンク発行時点の仮押さえは「ダブルブッキング防止のための代表候補」で十分なので、
+// 選んだ候補の先頭から最大この件数までだけ仮押さえする。
+const MAX_SELF_HOLD_CANDIDATES = 10;
+
 export async function GET(req: Request): Promise<NextResponse> {
   try {
     const url = new URL(req.url);
@@ -70,7 +77,8 @@ export async function POST(req: Request): Promise<NextResponse> {
     if (Array.isArray(body.candidates) && body.candidates.length > 0) {
       const slots = body.candidates
         .map((c) => slotFromDto(c))
-        .filter((s): s is { start: number; end: number } => !!s);
+        .filter((s): s is { start: number; end: number } => !!s)
+        .slice(0, MAX_SELF_HOLD_CANDIDATES);
       // degrade-safe：仮押さえの一部/全部が失敗してもページ作成自体は成功として返す。
       await createSelfHoldsForPage(repo, page, slots, serverNow(body.now)).catch(() => {});
     }

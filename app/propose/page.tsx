@@ -55,6 +55,11 @@ function isValidDayHours(v: unknown): v is DayHours {
 }
 
 const TZ = 'Asia/Tokyo';
+// 自分用仮押さえ（リンク発行時点で候補をカレンダー上に確保する機能）の対象件数の上限。
+// サーバ側（/api/pages）の MAX_SELF_HOLD_CANDIDATES と必ず一致させること。
+// 候補は既定で最大50件選択されるため、上限なしで全部を仮押さえすると平日日中が
+// [調整中]で埋まってしまう事故が実際に起きた（2026-08-12）。
+const MAX_SELF_HOLD_CANDIDATES = 10;
 const HOUR_START = 8; // 表示開始
 const HOUR_END = 23; // 表示終了
 const SLOT_PX = 60; // 1時間=60px
@@ -602,10 +607,13 @@ export default function ProposePage() {
       // 選んだ候補（ドラッグ/リサイズで動かした分は effectiveSlots に反映済み）。
       // サーバ側でこの候補すべてに自分用の仮押さえ（[調整中]・灰色）を即座に作る
       // （社長要望：仮押さえ＝リンクを発行した時点で自分の枠を抑える）。
+      // 平日日中が埋まる事故を防ぐため、実際に仮押さえする件数は先頭から上限までに絞る
+      // （相手に提示する候補自体は制限しない・あくまでカレンダー上のブロック数だけ絞る）。
       const candidates = Array.from(selectedSlots)
         .sort((a, b) => a - b)
         .map((i) => effectiveSlots[i])
-        .filter((s): s is SlotDto => !!s);
+        .filter((s): s is SlotDto => !!s)
+        .slice(0, MAX_SELF_HOLD_CANDIDATES);
       const res = await fetch('/api/pages', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -1124,6 +1132,12 @@ export default function ProposePage() {
                 ? '設定を更新しました。相手に配ったリンクは変わりません。'
                 : 'このURLを相手に送るだけ。相手は空いている枠を選ぶだけで日程が決まります。'}
             </p>
+            {!editSlug && selectedSlots.size > 0 && (
+              <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--sc-sub)' }}>
+                候補のうち先頭{Math.min(selectedSlots.size, MAX_SELF_HOLD_CANDIDATES)}件をあなたのGoogleカレンダーに仮押さえ（灰色）として反映しました。
+                {selectedSlots.size > MAX_SELF_HOLD_CANDIDATES && '（カレンダーが埋まりすぎないよう、残りは仮押さえしていません）'}
+              </p>
+            )}
             <div className="sc-link">
               <input readOnly value={doneUrl} onFocus={(e) => e.currentTarget.select()} />
               <button className="sc-btn primary" style={{ flex: 'none' }} onClick={() => { navigator.clipboard.writeText(doneUrl); }}>コピー</button>
