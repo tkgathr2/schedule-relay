@@ -654,12 +654,23 @@ export default function ProposePage() {
       const origin = window.location.origin;
       const url = `${origin}/b/${slug}`;
       setDoneUrl(url);
-      // メール本文用テキスト（ドラッグ/リサイズで動かした候補は effectiveSlots に反映済み）
-      const lines = Array.from(selectedSlots)
+      // メール本文用テキスト（ドラッグ/リサイズで動かした候補は effectiveSlots に反映済み）。
+      // カレンダー表示・自分用仮押さえと同じく、切れ目のない候補（例: 13:00-14:00と14:00-15:00）は
+      // 1行「13:00-18:00」のようにまとめて、読みやすくする（社長要望：テキストも連続分は統合）。
+      const sortedForText = Array.from(selectedSlots)
         .sort((a, b) => a - b)
         .map((i) => effectiveSlots[i])
-        .filter((s): s is SlotDto => !!s)
-        .map((s) => `・${fmtSlotJa(s.start, s.end)}`);
+        .filter((s): s is SlotDto => !!s);
+      const mergedForText: SlotDto[] = [];
+      for (const s of sortedForText) {
+        const last = mergedForText[mergedForText.length - 1];
+        if (last && last.end === s.start) {
+          mergedForText[mergedForText.length - 1] = { start: last.start, end: s.end };
+        } else {
+          mergedForText.push(s);
+        }
+      }
+      const lines = mergedForText.map((s) => `・${fmtSlotJa(s.start, s.end)}`);
       setCopyText(
         [
           `${(title.trim() || '日程候補')} の候補です。`,
