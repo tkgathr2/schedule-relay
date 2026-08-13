@@ -12,7 +12,6 @@ import {
   releaseAllSelfHoldsForPage,
   listSelfHoldSlotsForPage,
   validateSlot,
-  pickOneCandidatePerDay,
 } from '../booking.js';
 import { ServiceError, type ServiceErrorCode } from '../errors.js';
 import { expandWorkingWindows } from '../../domain/working-hours.js';
@@ -411,6 +410,30 @@ describe('自分用の仮押さえ（社長要望：リンク発行時点で自�
     expect(await listSelfHoldSlotsForPage(repo, page, NOW)).toEqual([]);
   });
 
+  it('releaseAllSelfHoldsForPage：1件の解放が失敗しても、残りの仮押さえの解放は中断されない（バグチェック指摘7の回帰防止）', async () => {
+    const page = await makePage(repo);
+    await createSelfHoldsForPage(repo, page, [SLOT_10, SLOT_11], NOW);
+    expect(await listSelfHoldSlotsForPage(repo, page, NOW)).toHaveLength(2);
+
+    // 1件目の releaseHold だけDB障害等で失敗させる（以前はここでループ全体が中断し、
+    // 2件目以降が未解放のまま残っていた）。
+    const originalReleaseHold = repo.releaseHold.bind(repo);
+    let failedOnce = false;
+    repo.releaseHold = async (id: string) => {
+      if (!failedOnce) {
+        failedOnce = true;
+        throw new Error('simulated release failure');
+      }
+      return originalReleaseHold(id);
+    };
+
+    await releaseAllSelfHoldsForPage(repo, page, NOW);
+
+    // 失敗した1件は残るが、もう1件はループが中断されずに解放されていること。
+    const remaining = await listSelfHoldSlotsForPage(repo, page, NOW);
+    expect(remaining).toHaveLength(1);
+  });
+
   it('自分用仮押さえは /api/events の「未確定の調整」対象にならない（idempotencyKeyがself:で始まる）', async () => {
     const page = await makePage(repo);
     await createSelfHoldsForPage(repo, page, [SLOT_10], NOW);
@@ -492,13 +515,6 @@ describe('固定候補モード（社長要望2026-08-13：/propose で選んだ
     const page = { id: 'p', organizerId: 'org', type: 'T1', slug: 's', isActive: true, createdAt: NOW, settings: baseSettings } as BookingPageRec;
     const slots = availabilityForPage(page, NOW);
     expect(slots.length).toBeGreaterThan(1);
-  });
-
-  it('pickOneCandidatePerDay は同じ日(JST)のうち最も早い枠だけを残す', () => {
-    const picked = pickOneCandidatePerDay([CAND_OVERLAP_B, CAND_OVERLAP_A, CAND_1]);
-    // CAND_1/CAND_OVERLAP_A/CAND_OVERLAP_B は全部同じJST日付なので1件だけ残る＝最も早い開始時刻のもの
-    expect(picked).toHaveLength(1);
-    expect(picked[0]).toEqual(CAND_OVERLAP_A);
   });
 });
 

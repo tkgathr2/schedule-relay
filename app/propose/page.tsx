@@ -238,6 +238,10 @@ export default function ProposePage() {
   const [editSlug, setEditSlug] = useState<string | null>(null);
   const [editLoaded, setEditLoaded] = useState(false);
   const [editLoadErr, setEditLoadErr] = useState<string | null>(null);
+  // 編集ロードで既存の settings.candidates を復元できたときに立てる。
+  // 直後に走る自動抽出useEffectが「復元した候補」を勝手に上書きしてしまうのを1回だけ防ぐ
+  // （社長指摘のバグ：編集画面を開くと元の候補が復元されず新規抽出で上書きされる問題の修正）。
+  const skipNextAutoExtractRef = useRef(false);
   useEffect(() => {
     const sp = new URLSearchParams(window.location.search);
     const slug = sp.get('edit');
@@ -275,6 +279,23 @@ export default function ProposePage() {
             }
           }
           setWeeklyHours(merged);
+        }
+        // 既存の候補（settings.candidates＝相手に見せている本物の候補）を画面に復元する。
+        // これをしないと、直後に走る自動抽出useEffectが全く別の新規候補を作ってしまい、
+        // 「変更を保存する」を押した瞬間に相手へ提示中の候補が無関係な内容へ丸ごと
+        // 差し替わってしまう（社長指摘の重大バグ）。
+        const cands = s.candidates;
+        if (Array.isArray(cands) && cands.length > 0) {
+          const restored = cands
+            .map((c) => (c && typeof c === 'object' ? (c as Record<string, unknown>) : null))
+            .filter((c): c is Record<string, unknown> => !!c)
+            .map((c) => ({ start: String(c.start), end: String(c.end) }))
+            .filter((c) => !Number.isNaN(Date.parse(c.start)) && !Number.isNaN(Date.parse(c.end)));
+          if (restored.length > 0) {
+            skipNextAutoExtractRef.current = true;
+            setRawSlots(restored);
+            setSelectedSlots(new Set(restored.map((_, i) => i)));
+          }
         }
       } catch (e) {
         setEditLoadErr(e instanceof Error ? e.message : '読み込みに失敗しました');
@@ -440,11 +461,8 @@ export default function ProposePage() {
   const [copyText, setCopyText] = useState('');
   const [applying, setApplying] = useState(false);
   const [applyErr, setApplyErr] = useState<string | null>(null);
-  // 成功画面での正確な件数表示用：相手に提示した候補の総数と、実際に自分用仮押さえを作った日数
-  // （仮押さえは日ごとに代表1件だけなので、候補総数とは一致しないことがある）。
-  const [selfHoldSummary, setSelfHoldSummary] = useState<{ totalCandidates: number; selfHoldDays: number } | null>(
-    null,
-  );
+  // 成功画面での件数表示用：相手に提示した候補の総数（自分用仮押さえも同じ件数だけ作られる）。
+  const [selfHoldSummary, setSelfHoldSummary] = useState<{ totalCandidates: number } | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -504,6 +522,11 @@ export default function ProposePage() {
   // extracting中・loadingCals中・canExtract不可・カレンダー連携無効時は何もしない。
   useEffect(() => {
     if (!editLoaded || loadingCals || extracting || !canExtract) return;
+    if (skipNextAutoExtractRef.current) {
+      // 編集ロードで既存候補を復元した直後の1回だけ、自動抽出による上書きをスキップする。
+      skipNextAutoExtractRef.current = false;
+      return;
+    }
     const t = setTimeout(() => {
       // 最新の extract を呼ぶ（依存配列で関数参照は最新が保証される）
       extract();
@@ -577,19 +600,17 @@ export default function ProposePage() {
     try {
       // 選んだ候補（ドラッグ/リサイズで動かした分は effectiveSlots に反映済み）。
       // ここで選んだ候補は「相手に実際に提示する候補そのもの」としてサーバに丸ごと送る
-      // （社長要望2026-08-13：相手に見せる候補と、ここで選んだ候補を一致させる。
-      //  以前は日ごとに1件へ間引いてから送っていたが、それだと相手に提示する候補まで
-      //  間引かれてしまっていた）。
-      // 自分用仮押さえ（[調整中]・灰色）は、この全候補のうちサーバ側で日ごとに代表1件へ
-      // 間引いたものだけをカレンダーに作る（カレンダーが密集する事故防止・社長要望）。
+      // （社長要望2026-08-13：相手に見せる候補・自分用仮押さえ・ここで選んだ候補の3つを
+      //  完全に一致させる。以前は自分用仮押さえだけ日ごとに1件へ間引いていたが、それだと
+      //  「候補として出しているのに自分のカレンダーには一部しか反映されていない」という
+      //  食い違いになるため撤廃した＝選んだ候補は全部そのままカレンダーにも仮押さえされる）。
       // ※編集保存時も同じ候補セットを送り直す＝サーバ側で候補と仮押さえを両方作り直す
       //  （社長指摘：編集で候補を変えても古い仮押さえがカレンダーに残ったまま反映されない問題）。
       const candidates = Array.from(selectedSlots)
         .sort((a, b) => a - b)
         .map((i) => effectiveSlots[i])
         .filter((s): s is SlotDto => !!s);
-      const seenDays = new Set(candidates.map((s) => msToJstYmd(Date.parse(s.start))));
-      setSelfHoldSummary({ totalCandidates: candidates.length, selfHoldDays: seenDays.size });
+      setSelfHoldSummary({ totalCandidates: candidates.length });
 
       if (editSlug) {
         // 編集モード：既存ページの設定を更新するだけ（新規リンクは作らない・slugも変わらない）。
@@ -1141,8 +1162,7 @@ export default function ProposePage() {
             </p>
             {selfHoldSummary && selfHoldSummary.totalCandidates > 0 && (
               <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--sc-sub)' }}>
-                相手には候補{selfHoldSummary.totalCandidates}件をそのまま提示します。あわせて、候補がある{selfHoldSummary.selfHoldDays}日それぞれ1件ずつ、計{selfHoldSummary.selfHoldDays}件をあなたのGoogleカレンダーに仮押さえ（灰色）として反映しました。
-                {selfHoldSummary.totalCandidates > selfHoldSummary.selfHoldDays && '（カレンダーが埋まりすぎないよう、同じ日の他の候補は仮押さえしていません）'}
+                相手には候補{selfHoldSummary.totalCandidates}件をそのまま提示します。同じ{selfHoldSummary.totalCandidates}件をあなたのGoogleカレンダーにも仮押さえ（灰色）として反映しました。
               </p>
             )}
             <div className="sc-link">
@@ -1568,7 +1588,7 @@ export default function ProposePage() {
                   )}
                   <button
                     className="sc-btn primary"
-                    disabled={applying || (!editSlug && selectedSlots.size === 0)}
+                    disabled={applying || selectedSlots.size === 0}
                     onClick={applySelected}
                   >
                     {applying ? (editSlug ? '保存中…' : '反映中…') : (editSlug ? '変更を保存する' : 'この候補を反映')}

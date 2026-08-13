@@ -5,9 +5,11 @@
  *    ①settings.candidates として保存し、相手に見せる空き枠を「この候補リストそのもの」に
  *      固定する（社長要望2026-08-13：/propose で選んだ候補と、相手が実際に選べる候補を一致させる。
  *      未指定なら従来通り営業時間グリッドからの自動列挙＝T1空き時間リンク相当のまま）。
- *    ②選んだ候補のうち「日ごとに代表1件」に間引いたうえで、主催者カレンダー上に
- *      [調整中] の仮押さえを即座に作る（社長要望：仮押さえ＝リンク発行時点で自分の枠を抑える。
- *      間引くのは同じ日にブロックが密集する事故を防ぐため・degrade-safe）。
+ *    ②選んだ候補**全部**に、主催者カレンダー上で [調整中] の仮押さえを即座に作る
+ *      （社長要望2026-08-13：相手に見せる候補と自分用仮押さえを完全一致させる。
+ *      以前は日ごとに代表1件へ間引いていたが、それだと「候補として出しているのに
+ *      自分のカレンダーには一部しか反映されていない」食い違いになるため撤廃した。
+ *      件数の暴走はcreateSelfHoldsForPage内のMAX_SELF_HOLD_SLOTSで最終的に歯止めする・degrade-safe）。
  *
  * GET /api/pages — 予約ページ一覧（ダッシュボード用・/links 画面のデータ源）。
  *
@@ -22,7 +24,7 @@ import { jsonError, slotFromDto, slotToDto, serverNow } from '@/service/http';
 import { rateLimit } from '@/service/rate-limit';
 import { assertValidSlug } from '@/service/security';
 import { requireSessionUserId } from '@/service/auth/session';
-import { createSelfHoldsForPage, pickOneCandidatePerDay } from '@/service/booking';
+import { createSelfHoldsForPage } from '@/service/booking';
 
 const VALID_TYPES: AdjustmentType[] = ['T1', 'T2', 'T3', 'T4', 'T5', 'T6'];
 
@@ -85,7 +87,7 @@ export async function POST(req: Request): Promise<NextResponse> {
 
     if (slots.length > 0) {
       // degrade-safe：仮押さえの一部/全部が失敗してもページ作成自体は成功として返す。
-      await createSelfHoldsForPage(repo, page, pickOneCandidatePerDay(slots), serverNow(body.now)).catch(() => {});
+      await createSelfHoldsForPage(repo, page, slots, serverNow(body.now)).catch(() => {});
     }
 
     return NextResponse.json({ page }, { status: 201 });

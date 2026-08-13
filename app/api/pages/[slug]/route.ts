@@ -5,8 +5,10 @@
  *   body.candidates を渡すと：
  *    ①settings.candidates を新しい候補リストで丸ごと置き換える（社長要望2026-08-13：相手に見せる
  *      候補を、この候補リストそのものに固定する。/api/pages のPOSTと同じ仕様）。
- *    ②自分用仮押さえ（[調整中]）も、日ごとに代表1件へ間引いた新しい候補セットで作り直す
- *      （社長指摘：編集で候補を変えても古い仮押さえがカレンダーに残ったまま反映されない問題の修正）。
+ *    ②自分用仮押さえ（[調整中]）も、新しい候補**全部**で作り直す（社長指摘：編集で候補を変えても
+ *      古い仮押さえがカレンダーに残ったまま反映されない問題の修正／相手に見せる候補と自分用
+ *      仮押さえを完全一致させる。件数の暴走はcreateSelfHoldsForPage内のMAX_SELF_HOLD_SLOTSで
+ *      最終的に歯止めする）。
  */
 import { NextResponse } from 'next/server';
 import { getRepository } from '@/repo/index';
@@ -14,7 +16,7 @@ import { ServiceError } from '@/service/errors';
 import { jsonError, slotFromDto, slotToDto, serverNow } from '@/service/http';
 import { assertValidSlug } from '@/service/security';
 import { requireSessionUserId } from '@/service/auth/session';
-import { createSelfHoldsForPage, releaseAllSelfHoldsForPage, pickOneCandidatePerDay } from '@/service/booking';
+import { createSelfHoldsForPage, releaseAllSelfHoldsForPage } from '@/service/booking';
 
 export async function GET(
   _req: Request,
@@ -101,10 +103,10 @@ export async function PATCH(
     if (!page) throw new ServiceError('NOT_FOUND', `slug が見つかりません: ${slug}`);
 
     if (hasCandidates) {
-      // 既存の自分用仮押さえを全部解放してから、日ごとに代表1件へ間引いた新しい候補セットで作り直す（degrade-safe）。
+      // 既存の自分用仮押さえを全部解放してから、新しい候補**全部**で作り直す（degrade-safe）。
       const now = serverNow(body.now);
       await releaseAllSelfHoldsForPage(repo, page, now).catch(() => {});
-      await createSelfHoldsForPage(repo, page, pickOneCandidatePerDay(slots), now).catch(() => {});
+      await createSelfHoldsForPage(repo, page, slots, now).catch(() => {});
     }
 
     return NextResponse.json({ page });
