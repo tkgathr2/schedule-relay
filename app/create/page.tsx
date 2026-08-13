@@ -4,6 +4,7 @@
  * 左＝設定フォーム／右＝週カレンダーで受付時間帯をプレビュー。保存で公開リンク発行。
  */
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import '../scheduler.css';
 
 const TZ = 'Asia/Tokyo';
@@ -123,7 +124,7 @@ export default function CreatePage() {
   return (
     <div className="sc-wrap">
       <div className="sc-topbar">
-        <div className="sc-logo"><span className="mk">📅</span>スケ調くん</div>
+        <Link href="/" className="sc-logo" style={{ textDecoration: 'none', color: 'inherit' }}><span className="mk">📅</span>スケ調くん</Link>
         <div className="sc-spacer" />
         <a href="/propose" style={{ fontSize: 12.5, color: '#2563eb', textDecoration: 'none', fontWeight: 600, marginRight: 12 }}>→ 詳細：候補を自動抽出</a>
         <span className="sc-pill">空き時間リンクを作成</span>

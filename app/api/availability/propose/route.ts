@@ -42,11 +42,15 @@ export async function POST(req: Request): Promise<NextResponse> {
     const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
     if (!body) throw new ServiceError('VALIDATION', 'JSON ボディが必要です');
 
-    const periodStart = parseTime(body.periodStart);
+    const rawPeriodStart = parseTime(body.periodStart);
     const periodEnd = parseTime(body.periodEnd);
-    if (periodStart === null) throw new ServiceError('VALIDATION', 'periodStart が不正です');
+    if (rawPeriodStart === null) throw new ServiceError('VALIDATION', 'periodStart が不正です');
     if (periodEnd === null) throw new ServiceError('VALIDATION', 'periodEnd が不正です');
-    if (periodEnd <= periodStart) throw new ServiceError('VALIDATION', 'periodEnd は periodStart より後である必要があります');
+    if (periodEnd <= rawPeriodStart) throw new ServiceError('VALIDATION', 'periodEnd は periodStart より後である必要があります');
+    // periodStart が過去日時でも、実際に生成する候補は必ず「今」以降にする
+    // （社長指摘：期間の開始日を過去に設定できてしまい、過去日時の候補が生成されていた問題の修正。
+    //  クライアント側の<input type="date" min>は直接入力で回避できるため、ここで最終防御する）。
+    const periodStart = Math.max(rawPeriodStart, Date.now());
 
     const duration = Number(body.durationMinutes);
     if (!Number.isFinite(duration) || duration < 1 || duration > 24 * 60) {
