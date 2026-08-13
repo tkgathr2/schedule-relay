@@ -241,36 +241,10 @@ function pageTitle(page: BookingPageRec): string {
 const SELF_HOLD_HOLDER_ID = 'organizer-self';
 const SELF_HOLD_TTL_MIN = 180 * 24 * 60; // 180日＝TTLで自然失効させず、確定/取消で明示的に片付ける前提
 
-/** JST の暦日キー（UTC+9固定オフセットでの日単位グルーピング用）。 */
-function jstDayKey(ms: number): number {
-  return Math.floor((ms + 9 * 60 * 60 * 1000) / (24 * 60 * 60 * 1000));
-}
-
-/**
- * 候補一覧から「日ごとに代表1件（最も早い枠）」だけを間引く。
- * 相手に提示する候補（settings.candidates）はそのまま全部残す一方、
- * 自分用仮押さえ（カレンダー上の [調整中] プレースホルダー）は同じ日にブロックが
- * 密集しないよう、この間引き後のリストだけを使って作る。
- */
-export function pickOneCandidatePerDay(slots: readonly Slot[]): Slot[] {
-  const sorted = [...slots].sort((a, b) => a.start - b.start);
-  const seenDays = new Set<number>();
-  const out: Slot[] = [];
-  for (const s of sorted) {
-    const key = jstDayKey(s.start);
-    if (seenDays.has(key)) continue;
-    seenDays.add(key);
-    out.push(s);
-  }
-  return out;
-}
-
 // 自分用仮押さえの最終安全弁（社長指示・2026-08-13）。
-// 呼び出し側（propose.tsx）は既に「候補がある日ごとに代表1件」まで絞ってから渡してくるため、
-// 通常はここに到達する時点で件数=対象日数になっている。ただし候補抽出件数(maxSlots)は最大200まで
-// 選べる設定になっており、それら全部が異なる日に散らばる極端なケースでは200件近い仮押さえが
-// 作られ得る。以前の事故（10件キャップが日付集中を招いた）を繰り返さないよう、
-// 日ベースの絞り込みは維持したまま、通常の運用ではまず到達しない大きめの値を最後の歯止めとして置く。
+// 相手に見せる候補と自分用仮押さえを完全一致させる方針（同日・2026-08-13社長要望）のため、
+// ここに渡ってくる候補は間引かれていない全件になる。候補抽出件数(maxSlots)は最大200まで
+// 選べる設定になっており、通常の運用ではまず到達しない大きめの値を最後の歯止めとして置く。
 const MAX_SELF_HOLD_SLOTS = 100;
 
 function selfEventIdempotencyKey(pageId: string): string {
@@ -289,8 +263,18 @@ async function getOrCreateSelfEvent(repo: Repository, page: BookingPageRec): Pro
   return event;
 }
 
+/**
+ * 1件の自分用仮押さえを解放する。呼び出し元（releaseAllSelfHoldsForPage等）が複数件を
+ * 順番に処理するループの中で使われるため、1件のDB更新失敗が残り全部の解放を止めてしまわ
+ * ないよう、ここで例外を吸収する（degrade-safe。バグチェックで指摘された、release失敗が
+ * ループを中断させ古い[調整中]予定が残存する問題の修正）。
+ */
 async function releaseSelfHold(repo: Repository, page: BookingPageRec, hold: HoldRec): Promise<void> {
-  await repo.releaseHold(hold.id);
+  try {
+    await repo.releaseHold(hold.id);
+  } catch {
+    return;
+  }
   if (!hold.googleEventId) return;
   try {
     const gcfg = await googleConfigForUserId(page.organizerId);
