@@ -11,6 +11,8 @@ import {
   createSelfHoldsForPage,
   releaseAllSelfHoldsForPage,
   listSelfHoldSlotsForPage,
+  validateSlot,
+  pickOneCandidatePerDay,
 } from '../booking.js';
 import { ServiceError, type ServiceErrorCode } from '../errors.js';
 import { expandWorkingWindows } from '../../domain/working-hours.js';
@@ -432,6 +434,71 @@ describe('自分用の仮押さえ（社長要望：リンク発行時点で自�
     }));
     await createSelfHoldsForPage(repo, page, manySlots, NOW);
     expect(await listSelfHoldSlotsForPage(repo, page, NOW)).toHaveLength(100);
+  });
+});
+
+describe('固定候補モード（社長要望2026-08-13：/propose で選んだ候補そのものを相手に提示する）', () => {
+  let repo: MemoryRepository;
+  beforeEach(() => {
+    repo = new MemoryRepository();
+  });
+
+  // 実際の社長の指摘に合わせた5候補（うち8/15に3件・重なりあり）
+  const CAND_1 = { start: jst(12, 0), end: jst(13, 0) }; // 8/13(木) 相当をシミュレートするため日付は基準日+αで代用
+  const CAND_OVERLAP_A = { start: jst(11, 0), end: jst(12, 0) };
+  const CAND_OVERLAP_B = { start: jst(11, 15), end: jst(12, 15) }; // Aと45分重複
+
+  it('settings.candidates があれば、営業時間グリッドではなく候補リストそのものを返す', async () => {
+    const page = await makePage(repo, {
+      ...baseSettings,
+      candidates: [CAND_1, CAND_OVERLAP_A, CAND_OVERLAP_B].map((s) => ({
+        start: new Date(s.start).toISOString(),
+        end: new Date(s.end).toISOString(),
+      })),
+    });
+    const slots = availabilityForPage(page, NOW);
+    expect(slots).toHaveLength(3);
+    expect(slots).toContainEqual(CAND_1);
+    expect(slots).toContainEqual(CAND_OVERLAP_A);
+    expect(slots).toContainEqual(CAND_OVERLAP_B); // 15分刻みグリッドに乗らない・重複時間帯でもそのまま提示される
+  });
+
+  it('候補が busy と重なっていれば availability から除外される（誰かが確定/仮押さえした枠は消える）', async () => {
+    const page = await makePage(repo, {
+      ...baseSettings,
+      candidates: [CAND_1, CAND_OVERLAP_A].map((s) => ({
+        start: new Date(s.start).toISOString(),
+        end: new Date(s.end).toISOString(),
+      })),
+    });
+    const slots = availabilityForPage(page, NOW, [{ start: CAND_1.start, end: CAND_1.end }]);
+    expect(slots).toEqual([CAND_OVERLAP_A]);
+  });
+
+  it('validateSlot は固定候補モードでグリッド整列チェックを行わず、候補リストと完全一致する枠だけ通す', () => {
+    const page = { id: 'p', organizerId: 'org', type: 'T2', slug: 's', isActive: true, createdAt: NOW, settings: {
+      ...baseSettings,
+      candidates: [
+        { start: new Date(CAND_OVERLAP_B.start).toISOString(), end: new Date(CAND_OVERLAP_B.end).toISOString() },
+      ],
+    } } as BookingPageRec;
+    // 15分グリッドには乗っているが候補外の枠 → 通常モードなら通るが固定候補モードでは弾かれる
+    expect(() => validateSlot(page, SLOT_10, NOW)).toThrow();
+    // 候補そのもの（グリッド上は非整列でも良い）は通る
+    expect(() => validateSlot(page, CAND_OVERLAP_B, NOW)).not.toThrow();
+  });
+
+  it('settings.candidates が無ければ従来通り営業時間グリッドの自動列挙のまま（後方互換）', () => {
+    const page = { id: 'p', organizerId: 'org', type: 'T1', slug: 's', isActive: true, createdAt: NOW, settings: baseSettings } as BookingPageRec;
+    const slots = availabilityForPage(page, NOW);
+    expect(slots.length).toBeGreaterThan(1);
+  });
+
+  it('pickOneCandidatePerDay は同じ日(JST)のうち最も早い枠だけを残す', () => {
+    const picked = pickOneCandidatePerDay([CAND_OVERLAP_B, CAND_OVERLAP_A, CAND_1]);
+    // CAND_1/CAND_OVERLAP_A/CAND_OVERLAP_B は全部同じJST日付なので1件だけ残る＝最も早い開始時刻のもの
+    expect(picked).toHaveLength(1);
+    expect(picked[0]).toEqual(CAND_OVERLAP_A);
   });
 });
 

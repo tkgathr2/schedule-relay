@@ -8,7 +8,7 @@
  *  - カレンダー連携（Google/MS freebusy）は後続フェーズ。それまでは settings.busy を
  *    busy のスタンドインとして扱い、UIプレビュー/テストで実フローを成立させる。
  */
-import { computeAvailability } from '../domain/availability.js';
+import { computeAvailability, inflate } from '../domain/availability.js';
 import { isAligned, durationOf } from '../domain/grid.js';
 import { GRID_MS, MINUTE_MS, type Interval, type Slot } from '../domain/types.js';
 import { expandWorkingWindows, type WorkingHours } from '../domain/working-hours.js';
@@ -31,6 +31,13 @@ export interface ResolvedSettings {
   workingHours: WorkingHours;
   /** カレンダー連携前の busy スタンドイン（UTC）。 */
   busy: Interval[];
+  /**
+   * 固定候補リスト（社長要望・2026-08-13：/propose で選んだ候補「そのもの」を相手に提示する）。
+   * 指定があれば、営業時間グリッドからの自動列挙ではなく、このリストのうち
+   * まだ busy と重ならないものだけをそのまま availability として返す（§14 相当の拡張）。
+   * 未指定（従来のT1空き時間リンク等）は今まで通りグリッド列挙。
+   */
+  fixedCandidates?: Slot[];
 }
 
 function toMs(v: unknown): number | null {
@@ -52,6 +59,19 @@ function parseBusy(raw: unknown): Interval[] {
     if (s !== null && e !== null && s < e) out.push({ start: s, end: e });
   }
   return out;
+}
+
+/** settings.candidates（/propose で選んだ固定候補リスト）を解決する。空/未指定は undefined。 */
+function parseCandidates(raw: unknown): Slot[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: Slot[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const s = toMs((item as Record<string, unknown>).start);
+    const e = toMs((item as Record<string, unknown>).end);
+    if (s !== null && e !== null && s < e) out.push({ start: s, end: e });
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 /** settings(JSON) を既定で補完して解決する。 */
@@ -88,6 +108,7 @@ export function resolveSettings(raw: unknown): ResolvedSettings {
       sun: strArr(wh.sun) ?? [],
     },
     busy: parseBusy(s.busy),
+    fixedCandidates: parseCandidates(s.candidates),
   };
 }
 
@@ -102,8 +123,21 @@ export function availabilityForPage(
   extraBusy: readonly Interval[] = [],
 ): Slot[] {
   const cfg = resolveSettings(page.settings);
-  const windows = expandWorkingWindows(cfg.workingHours, now, cfg.horizonDays);
   const busy = extraBusy.length ? [...cfg.busy, ...extraBusy] : cfg.busy;
+
+  if (cfg.fixedCandidates) {
+    // 固定候補モード（/propose で選んだ候補「そのもの」を提示する・社長要望2026-08-13）：
+    // 営業時間グリッドからの自動列挙はせず、候補リストのうち now/min_notice を過ぎておらず
+    // かつ busy（バッファ込み）と重ならないものだけを、そのまま返す。
+    const earliest = now + cfg.minNoticeMin * MINUTE_MS;
+    const inflatedBusy = inflate(busy, cfg.bufferBeforeMin * MINUTE_MS, cfg.bufferAfterMin * MINUTE_MS);
+    return cfg.fixedCandidates
+      .filter((c) => c.start >= earliest)
+      .filter((c) => !inflatedBusy.some((b) => c.start < b.end && b.start < c.end))
+      .sort((a, b) => a.start - b.start);
+  }
+
+  const windows = expandWorkingWindows(cfg.workingHours, now, cfg.horizonDays);
   return computeAvailability({
     workingWindows: windows,
     busy,
@@ -144,9 +178,11 @@ export function validateSlot(page: BookingPageRec, slot: Slot, now: number): voi
 
   if (slot.start <= now) throw new ServiceError('PAST_TIME', '過去または現在の枠は予約できません');
 
-  const aligned = isAligned(slot.start, cfg.gridMs) && isAligned(slot.end, cfg.gridMs);
-  if (!aligned || durationOf(slot) !== cfg.durationMin * MINUTE_MS) {
-    throw new ServiceError('GRID_VIOLATION', `枠は${cfg.durationMin}分・15分グリッドに整列している必要があります`);
+  if (!cfg.fixedCandidates) {
+    const aligned = isAligned(slot.start, cfg.gridMs) && isAligned(slot.end, cfg.gridMs);
+    if (!aligned || durationOf(slot) !== cfg.durationMin * MINUTE_MS) {
+      throw new ServiceError('GRID_VIOLATION', `枠は${cfg.durationMin}分・15分グリッドに整列している必要があります`);
+    }
   }
 
   if (slot.start < now + cfg.minNoticeMin * MINUTE_MS) {
@@ -204,6 +240,30 @@ function pageTitle(page: BookingPageRec): string {
  */
 const SELF_HOLD_HOLDER_ID = 'organizer-self';
 const SELF_HOLD_TTL_MIN = 180 * 24 * 60; // 180日＝TTLで自然失効させず、確定/取消で明示的に片付ける前提
+
+/** JST の暦日キー（UTC+9固定オフセットでの日単位グルーピング用）。 */
+function jstDayKey(ms: number): number {
+  return Math.floor((ms + 9 * 60 * 60 * 1000) / (24 * 60 * 60 * 1000));
+}
+
+/**
+ * 候補一覧から「日ごとに代表1件（最も早い枠）」だけを間引く。
+ * 相手に提示する候補（settings.candidates）はそのまま全部残す一方、
+ * 自分用仮押さえ（カレンダー上の [調整中] プレースホルダー）は同じ日にブロックが
+ * 密集しないよう、この間引き後のリストだけを使って作る。
+ */
+export function pickOneCandidatePerDay(slots: readonly Slot[]): Slot[] {
+  const sorted = [...slots].sort((a, b) => a.start - b.start);
+  const seenDays = new Set<number>();
+  const out: Slot[] = [];
+  for (const s of sorted) {
+    const key = jstDayKey(s.start);
+    if (seenDays.has(key)) continue;
+    seenDays.add(key);
+    out.push(s);
+  }
+  return out;
+}
 
 // 自分用仮押さえの最終安全弁（社長指示・2026-08-13）。
 // 呼び出し側（propose.tsx）は既に「候補がある日ごとに代表1件」まで絞ってから渡してくるため、
