@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import '../scheduler.css';
 import { moveRange, resizeEnd, nextBusyStart, hasConflict, groupSlots } from '../../src/domain/drag';
+import { layoutOverlaps } from '../../src/domain/calendar-layout';
 
 type Calendar = {
   id: string;
@@ -1533,17 +1534,28 @@ export default function ProposePage() {
                         {Array.from({ length: HOUR_END - HOUR_START }, (_, i) => i + HOUR_START).map((h) => (
                           <div key={h} className="pp-cal-day-hour" />
                         ))}
-                        {/* 既存予定ブロック */}
-                        {busy.map((b, bi) => {
+                        {/* 既存予定ブロック（時間帯が重なるものは横方向に列分割して、両方読めるようにする） */}
+                        {layoutOverlaps(busy).map((b, bi) => {
                           const top = msToTopPx(b.start, d.ymd);
                           const height = durationMsToHeightPx(b.start, b.end, d.ymd);
                           if (height <= 0) return null;
                           const color = calColorMap.get(b.calId) || '#9ca3af';
+                          const widthPct = 100 / b.cols;
+                          const leftPct = b.col * widthPct;
                           return (
                             <div
                               key={`b${bi}`}
                               className="pp-cal-busy pp-cal-busy-clickable"
-                              style={{ top, height, background: hexToRgba(color, 0.28), borderColor: hexToRgba(color, 0.5), borderLeft: `3px solid ${color}` }}
+                              style={{
+                                top,
+                                height,
+                                left: `calc(${leftPct}% + 2px)`,
+                                width: `calc(${widthPct}% - 4px)`,
+                                right: 'auto',
+                                background: hexToRgba(color, 0.28),
+                                borderColor: hexToRgba(color, 0.5),
+                                borderLeft: `3px solid ${color}`,
+                              }}
                               title={b.title || '予定あり'}
                               onPointerDown={(e) => e.stopPropagation()}
                               onClick={(e) => { e.stopPropagation(); setSelectedBusy(b); }}
