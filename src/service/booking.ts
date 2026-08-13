@@ -309,14 +309,18 @@ export async function createSelfHoldsForPage(
   slots: readonly Slot[],
   now: number,
 ): Promise<void> {
-  if (slots.length === 0) return;
+  // 既に過去になっている候補は仮押さえしない（社長指摘：過去日時が[調整中]として
+  // カレンダーに残り続けていた問題の修正）。相手に提示する側（availabilityForPage）は
+  // 元々 now/min_notice より前を除外しているので、ここで弾いても提示内容には影響しない。
+  const futureSlots = slots.filter((s) => s.start > now);
+  if (futureSlots.length === 0) return;
   const selfEvent = await getOrCreateSelfEvent(repo, page);
   const resourceId = selfHoldResourceId(page.id);
   const expiresAt = now + SELF_HOLD_TTL_MIN * MINUTE_MS;
   const gcfg = await googleConfigForUserId(page.organizerId);
 
   const created: { hold: HoldRec; slot: Slot }[] = [];
-  for (const slot of slots.slice(0, MAX_SELF_HOLD_SLOTS)) {
+  for (const slot of futureSlots.slice(0, MAX_SELF_HOLD_SLOTS)) {
     try {
       const candidate = await repo.upsertCandidate(selfEvent.id, slot);
       const result = await repo.createActiveHold({

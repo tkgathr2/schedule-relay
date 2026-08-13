@@ -510,6 +510,17 @@ describe('自分用の仮押さえ（社長要望：リンク発行時点で自�
     await createSelfHoldsForPage(repo, page, manySlots, NOW);
     expect(await listSelfHoldSlotsForPage(repo, page, NOW)).toHaveLength(100);
   });
+
+  it('既に過去になっている候補は仮押さえしない（社長指摘：過去日時の[調整中]がカレンダーに残る問題の修正）', async () => {
+    const page = await makePage(repo);
+    const PAST_SLOT = { start: NOW - 2 * 60 * MIN, end: NOW - MIN }; // NOWより前
+    await createSelfHoldsForPage(repo, page, [PAST_SLOT, SLOT_10, SLOT_11], NOW);
+    const slots = await listSelfHoldSlotsForPage(repo, page, NOW);
+    expect(slots).toHaveLength(2); // 過去のPAST_SLOTだけ除外され、未来の2件は作られる
+    expect(slots).not.toContainEqual(PAST_SLOT);
+    expect(slots).toContainEqual(SLOT_10);
+    expect(slots).toContainEqual(SLOT_11);
+  });
 });
 
 describe('自分用仮押さえのカレンダー表示：隣接候補は1本の予定にまとめる（社長要望2026-08-13）', () => {
