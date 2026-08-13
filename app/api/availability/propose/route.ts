@@ -17,7 +17,7 @@
 import { NextResponse } from 'next/server';
 import { googleFreeBusy, googleFreeBusyByCalendar, googleEventTitlesByCalendar } from '@/service/calendar/google';
 import { googleConfigForCurrentUser } from '@/service/calendar/tenant';
-import { proposeSlots } from '@/service/propose';
+import { proposeSlots, splitBusyIntervalsByTitle } from '@/service/propose';
 import { ServiceError } from '@/service/errors';
 import { jsonError, slotToDto } from '@/service/http';
 import { rateLimit } from '@/service/rate-limit';
@@ -97,22 +97,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       busy,
     });
 
-    // busyByCalendar に title を重ねる：busy 区間と重なる events.list の summary を持ってくる。
-    // events.list の方が rich（title 付き）なので、busy 単独区間より優先で title を埋める。
-    const busyByCalendarDto: Record<string, { start: string; end: string; title?: string }[]> = {};
-    for (const calId of Object.keys(busyByCalendar)) {
-      const intervals = busyByCalendar[calId] ?? [];
-      const titles = titlesByCalendar[calId] ?? [];
-      busyByCalendarDto[calId] = intervals.map((iv) => {
-        const hit = titles.find((t) => t.start < iv.end && t.end > iv.start);
-        const dto: { start: string; end: string; title?: string } = {
-          start: new Date(iv.start).toISOString(),
-          end: new Date(iv.end).toISOString(),
-        };
-        if (hit && hit.title) dto.title = hit.title;
-        return dto;
-      });
-    }
+    const busyByCalendarDto = splitBusyIntervalsByTitle(busyByCalendar, titlesByCalendar);
 
     return NextResponse.json({
       slots: slots.map(slotToDto),
