@@ -7,6 +7,7 @@
  *     候補ブロッククリックで個別トグル → 「この候補を反映」で予約ページ作成
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import '../scheduler.css';
 import { moveRange, resizeEnd, nextBusyStart, hasConflict, groupSlots } from '../../src/domain/drag';
 
@@ -1146,7 +1147,7 @@ export default function ProposePage() {
   return (
     <div className="sc-wrap">
       <div className="sc-topbar">
-        <div className="sc-logo"><span className="mk">📅</span>スケ調くん</div>
+        <Link href="/" className="sc-logo" style={{ textDecoration: 'none', color: 'inherit' }}><span className="mk">📅</span>スケ調くん</Link>
         <div className="sc-spacer" />
         <span className="sc-pill">{editSlug ? '調整内容を編集' : '候補を自動抽出'}</span>
       </div>
@@ -1267,8 +1268,29 @@ export default function ProposePage() {
             <div className="sc-field">
               <label>期間</label>
               <div className="sc-row2">
-                <input className="sc-input" type="date" value={periodStart} min={todayIso()} onChange={(e) => setPeriodStart(e.target.value)} />
-                <input className="sc-input" type="date" value={periodEnd} min={periodStart} onChange={(e) => setPeriodEnd(e.target.value)} />
+                <input
+                  className="sc-input"
+                  type="date"
+                  value={periodStart}
+                  min={todayIso()}
+                  onChange={(e) => {
+                    // min属性はネイティブpickerでの選択は防ぐが、直接入力（キー入力）での
+                    // 過去日付は素通りするため、ここでも念のため今日以降にクランプする
+                    // （社長指摘：過去の予定も入れられる設定になっていた問題の修正）。
+                    const v = e.target.value;
+                    setPeriodStart(v && v < todayIso() ? todayIso() : v);
+                  }}
+                />
+                <input
+                  className="sc-input"
+                  type="date"
+                  value={periodEnd}
+                  min={periodStart}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setPeriodEnd(v && v < periodStart ? periodStart : v);
+                  }}
+                />
               </div>
               <div className="pp-period-presets">
                 <button type="button" onClick={() => setEndOffsetDays(3)}>3日後</button>
