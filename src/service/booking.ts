@@ -9,7 +9,7 @@
  *    busy のスタンドインとして扱い、UIプレビュー/テストで実フローを成立させる。
  */
 import { computeAvailability, inflate } from '../domain/availability.js';
-import { isAligned, durationOf } from '../domain/grid.js';
+import { isAligned, durationOf, mergeIntervals } from '../domain/grid.js';
 import { GRID_MS, MINUTE_MS, type Interval, type Slot } from '../domain/types.js';
 import { expandWorkingWindows, type WorkingHours } from '../domain/working-hours.js';
 import type { BookingPageRec, ConfirmationRec, EventRec, HoldRec, Repository } from '../repo/types.js';
@@ -268,14 +268,24 @@ async function getOrCreateSelfEvent(repo: Repository, page: BookingPageRec): Pro
  * 順番に処理するループの中で使われるため、1件のDB更新失敗が残り全部の解放を止めてしまわ
  * ないよう、ここで例外を吸収する（degrade-safe。バグチェックで指摘された、release失敗が
  * ループを中断させ古い[調整中]予定が残存する問題の修正）。
+ *
+ * 隣接候補は1本のGoogleイベントにまとめてあるため（createSelfHoldsForPage参照）、
+ * 解放対象以外にもまだそのイベントを必要としているHoldが残る場合は、カレンダー予定自体は
+ * 消さない（remainingActiveGoogleEventIdsに含まれるIDは「解放後も他の誰かが使い続ける」印）。
  */
-async function releaseSelfHold(repo: Repository, page: BookingPageRec, hold: HoldRec): Promise<void> {
+async function releaseSelfHold(
+  repo: Repository,
+  page: BookingPageRec,
+  hold: HoldRec,
+  remainingActiveGoogleEventIds: ReadonlySet<string> = new Set(),
+): Promise<void> {
   try {
     await repo.releaseHold(hold.id);
   } catch {
     return;
   }
   if (!hold.googleEventId) return;
+  if (remainingActiveGoogleEventIds.has(hold.googleEventId)) return;
   try {
     const gcfg = await googleConfigForUserId(page.organizerId);
     if (gcfg) await deleteCalendarEvent(gcfg, hold.googleEventId);
@@ -284,7 +294,15 @@ async function releaseSelfHold(repo: Repository, page: BookingPageRec, hold: Hol
   }
 }
 
-/** リンク発行（候補反映）時：選んだ候補すべてに自分用の仮押さえを作る。degrade-safe。 */
+/**
+ * リンク発行（候補反映）時：選んだ候補すべてに自分用の仮押さえを作る。degrade-safe。
+ * カレンダー上の表示は、隣接・重複する候補は1本の連続した [調整中] 予定にまとめる
+ * （社長要望2026-08-13：候補を全件仮押さえするようにした結果、13:00-14:00・14:00-15:00…と
+ *  切れ目のない候補が1時間ごとの別ブロックとしてバラバラに積み上がって見づらくなったため）。
+ * Hold（DB上の予約枠）は引き続き候補1件＝1レコードのまま作る（個別解放・二重予約防止の
+ * 単位は変えない）。複数のHoldが同じ連続区間に属するときは、その区間の1つのGoogleイベントIDを
+ * 全員で共有する。
+ */
 export async function createSelfHoldsForPage(
   repo: Repository,
   page: BookingPageRec,
@@ -297,8 +315,8 @@ export async function createSelfHoldsForPage(
   const expiresAt = now + SELF_HOLD_TTL_MIN * MINUTE_MS;
   const gcfg = await googleConfigForUserId(page.organizerId);
 
+  const created: { hold: HoldRec; slot: Slot }[] = [];
   for (const slot of slots.slice(0, MAX_SELF_HOLD_SLOTS)) {
-    let hold: HoldRec;
     try {
       const candidate = await repo.upsertCandidate(selfEvent.id, slot);
       const result = await repo.createActiveHold({
@@ -310,24 +328,35 @@ export async function createSelfHoldsForPage(
         expiresAt,
         now,
       });
-      hold = result.hold;
+      created.push({ hold: result.hold, slot });
     } catch (e) {
       if (e instanceof ConflictHoldError) continue; // 選んだ候補同士が重複 → スキップ
       throw e;
     }
+  }
 
-    if (!gcfg) continue;
+  if (!gcfg || created.length === 0) return;
+
+  const merged = mergeIntervals(created.map(({ slot }) => slot));
+  for (const run of merged) {
+    let googleEventId: string | null = null;
     try {
-      const googleEventId = await createHoldPlaceholderEvent(gcfg, {
+      googleEventId = await createHoldPlaceholderEvent(gcfg, {
         summary: `[調整中] ${pageTitle(page)}`,
         description:
           'この日時を候補として相手に提示中です。相手が確定するとこの予定は自動的に正式な予定に置き換わります（他の候補は確定時に自動で解除されます）。',
-        startMs: slot.start,
-        endMs: slot.end,
+        startMs: run.start,
+        endMs: run.end,
       });
-      if (googleEventId) await repo.attachHoldGoogleEventId(hold.id, googleEventId);
     } catch {
       /* degrade-safe：カレンダー連携の失敗は仮押さえの成立に影響させない */
+      continue;
+    }
+    if (!googleEventId) continue;
+    for (const { hold, slot } of created) {
+      if (slot.start >= run.start && slot.end <= run.end) {
+        await repo.attachHoldGoogleEventId(hold.id, googleEventId).catch(() => {});
+      }
     }
   }
 }
@@ -343,7 +372,14 @@ export async function releaseSelfHoldForSlot(
     const selfEvent = await getOrCreateSelfEvent(repo, page);
     const holds = await repo.listActiveHoldsByEvent(selfEvent.id, now);
     const match = holds.find((h) => h.start === slot.start && h.end === slot.end);
-    if (match) await releaseSelfHold(repo, page, match);
+    if (!match) return;
+    // 解放対象以外で、まだ生きている（=これから解放しない）Holdが参照しているGoogleイベントIDは残す。
+    const remaining = new Set(
+      holds
+        .filter((h) => h.id !== match.id && h.googleEventId)
+        .map((h) => h.googleEventId as string),
+    );
+    await releaseSelfHold(repo, page, match, remaining);
   } catch {
     /* degrade-safe */
   }

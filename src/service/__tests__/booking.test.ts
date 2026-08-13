@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { MemoryRepository } from '../../repo/memory.js';
 import {
   availabilityForPage,
@@ -10,12 +10,29 @@ import {
   resolveSettings,
   createSelfHoldsForPage,
   releaseAllSelfHoldsForPage,
+  releaseSelfHoldForSlot,
   listSelfHoldSlotsForPage,
   validateSlot,
 } from '../booking.js';
 import { ServiceError, type ServiceErrorCode } from '../errors.js';
 import { expandWorkingWindows } from '../../domain/working-hours.js';
 import type { BookingPageRec } from '../../repo/types.js';
+import * as tenantModule from '../calendar/tenant.js';
+
+// カレンダー連携を薄くモックする（実APIは叩かない）。既定は他の全テストと同じ「未連携(null)」の
+// ままにしておき、隣接候補のGoogleイベント統合をテストするdescribeブロックだけ、そのブロック内で
+// 一時的にtruthyな設定へ差し替える（他のテストのdegrade-safe前提を壊さないため）。
+vi.mock('../calendar/tenant.js', () => ({
+  googleConfigForUserId: vi.fn(async () => null),
+}));
+let nextFakeEventId = 0;
+const deletedCalendarEventIds: string[] = [];
+vi.mock('../calendar/google.js', () => ({
+  createHoldPlaceholderEvent: vi.fn(async () => `fake-event-${nextFakeEventId++}`),
+  deleteCalendarEvent: vi.fn(async (_cfg: unknown, eventId: string) => {
+    deletedCalendarEventIds.push(eventId);
+  }),
+}));
 
 // 決定論的な基準時刻：2026-06-15(月) 00:00 JST = 2026-06-14 15:00 UTC
 const NOW = Date.UTC(2026, 5, 14, 15, 0);
@@ -457,6 +474,73 @@ describe('自分用の仮押さえ（社長要望：リンク発行時点で自�
     }));
     await createSelfHoldsForPage(repo, page, manySlots, NOW);
     expect(await listSelfHoldSlotsForPage(repo, page, NOW)).toHaveLength(100);
+  });
+});
+
+describe('自分用仮押さえのカレンダー表示：隣接候補は1本の予定にまとめる（社長要望2026-08-13）', () => {
+  let repo: MemoryRepository;
+  const SLOT_10_30 = { start: jst(10, 30), end: jst(11, 0) }; // SLOT_10(10:00-10:30) の直後
+  const SEPARATE_SLOT = { start: jst(14, 0), end: jst(14, 30) }; // 隣接しない別枠
+
+  beforeEach(() => {
+    repo = new MemoryRepository();
+    deletedCalendarEventIds.length = 0;
+    vi.mocked(tenantModule.googleConfigForUserId).mockResolvedValue({
+      clientId: 'cid',
+      clientSecret: 'csec',
+      refreshToken: 'rt',
+      calendarIds: ['auto'],
+    });
+  });
+
+  afterEach(() => {
+    vi.mocked(tenantModule.googleConfigForUserId).mockResolvedValue(null);
+  });
+
+  it('隣接・連続する候補（10:00-10:30, 10:30-11:00, 11:00-11:30）は同じGoogleイベントIDを共有する', async () => {
+    const page = await makePage(repo);
+    await createSelfHoldsForPage(repo, page, [SLOT_10, SLOT_10_30, SLOT_11], NOW);
+
+    const selfEvent = await createEventForPage(repo, page.slug, `self:${page.id}`);
+    const holds = await repo.listActiveHoldsByEvent(selfEvent.event.id, NOW);
+    expect(holds).toHaveLength(3);
+    const ids = new Set(holds.map((h) => h.googleEventId));
+    expect(ids.size).toBe(1); // 3件とも同じ1本のイベント
+    expect([...ids][0]).not.toBeNull();
+  });
+
+  it('隣接しない候補は別々のGoogleイベントIDになる', async () => {
+    const page = await makePage(repo);
+    await createSelfHoldsForPage(repo, page, [SLOT_10, SLOT_10_30, SLOT_11, SEPARATE_SLOT], NOW);
+
+    const selfEvent = await createEventForPage(repo, page.slug, `self:${page.id}`);
+    const holds = await repo.listActiveHoldsByEvent(selfEvent.event.id, NOW);
+    expect(holds).toHaveLength(4);
+    const ids = new Set(holds.map((h) => h.googleEventId));
+    expect(ids.size).toBe(2); // 連続した3件で1本＋離れた1件で1本＝計2本
+  });
+
+  it('連続した候補の一部だけ解放しても、他がまだ使っているGoogleイベントは削除しない', async () => {
+    const page = await makePage(repo);
+    await createSelfHoldsForPage(repo, page, [SLOT_10, SLOT_10_30, SLOT_11], NOW);
+
+    // SLOT_10_30（真ん中）だけ相手が実際に選んだことにする＝自分用仮押さえを1件だけ解放
+    await releaseSelfHoldForSlot(repo, page, SLOT_10_30, NOW);
+
+    const selfEvent = await createEventForPage(repo, page.slug, `self:${page.id}`);
+    const remaining = await repo.listActiveHoldsByEvent(selfEvent.event.id, NOW);
+    expect(remaining).toHaveLength(2); // SLOT_10, SLOT_11 はまだ active
+    expect(deletedCalendarEventIds).toHaveLength(0); // 他の2件がまだ使っているので削除されない
+  });
+
+  it('連続した候補を全部解放すると、最後にGoogleイベントが削除される', async () => {
+    const page = await makePage(repo);
+    await createSelfHoldsForPage(repo, page, [SLOT_10, SLOT_10_30, SLOT_11], NOW);
+
+    await releaseAllSelfHoldsForPage(repo, page, NOW);
+
+    expect(await listSelfHoldSlotsForPage(repo, page, NOW)).toEqual([]);
+    expect(deletedCalendarEventIds.length).toBeGreaterThan(0); // 誰も使わなくなったので削除される
   });
 });
 
