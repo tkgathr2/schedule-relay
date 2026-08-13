@@ -143,6 +143,9 @@ export default function BookingPage({ params }: { params: Promise<{ slug: string
       const p = jstParts(new Date(s.start));
       (m[p.key] ||= []).push(s);
     }
+    // 隣接判定（切れ目のない候補を視覚的に1本の連続ブロックとしてつなげるため）に使うので、
+    // 各日ごとに開始時刻の昇順で揃えておく。
+    for (const key of Object.keys(m)) m[key].sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
     return m;
   }, [slots]);
 
@@ -306,14 +309,34 @@ export default function BookingPage({ params }: { params: Promise<{ slug: string
                     <div className="sc-tcell">{h}:00</div>
                     {days.map((d) => (
                       <div key={d.key} className="sc-cell">
-                        {h === GRID_START && (slotsByDay[d.key] || []).map((s) => {
+                        {h === GRID_START && (slotsByDay[d.key] || []).map((s, i, arr) => {
                           const p = jstParts(new Date(s.start));
                           const top = (p.h + p.mi / 60 - GRID_START) * HOUR_PX;
-                          const ht = Math.max(15, (durMin / 60) * HOUR_PX - 2);
+                          // 切れ目のない候補（前後の候補と時刻が完全に連続）は、1本の連続ブロックに
+                          // 見えるよう隙間・角丸をつなぎ目側だけ消す（社長要望：候補の合体表示）。
+                          // クリック対象は引き続き候補1件ずつ＝実際に選べる枠は変わらない。
+                          const prev = arr[i - 1];
+                          const next = arr[i + 1];
+                          const joinedToPrev = !!prev && prev.end === s.start;
+                          const joinedToNext = !!next && next.start === s.end;
+                          const ht = (durMin / 60) * HOUR_PX - (joinedToNext ? 0 : 2);
                           const sel = picked?.start === s.start;
                           return (
-                            <button key={s.start} className={`sc-slot ${sel ? 'sel' : ''}`}
-                              style={{ top, height: ht }} disabled={holding} onClick={() => selectSlot(s)}>
+                            <button
+                              key={s.start}
+                              className={`sc-slot ${sel ? 'sel' : ''}`}
+                              style={{
+                                top,
+                                height: Math.max(15, ht),
+                                borderTopLeftRadius: joinedToPrev ? 0 : undefined,
+                                borderTopRightRadius: joinedToPrev ? 0 : undefined,
+                                borderBottomLeftRadius: joinedToNext ? 0 : undefined,
+                                borderBottomRightRadius: joinedToNext ? 0 : undefined,
+                                borderTop: joinedToPrev ? '1px solid rgba(255,255,255,.35)' : undefined,
+                              }}
+                              disabled={holding}
+                              onClick={() => selectSlot(s)}
+                            >
                               {fmtTime(s.start)}
                             </button>
                           );
