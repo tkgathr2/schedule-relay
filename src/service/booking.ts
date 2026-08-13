@@ -417,6 +417,33 @@ export async function releaseAllSelfHoldsForPage(repo: Repository, page: Booking
 }
 
 /**
+ * ページ取消時：そのページの本物の Event（相手側の調整）を全部 cancelled にし、残っている
+ * 相手側の active Hold も全部解放する。degrade-safe。
+ *
+ * 自分用仮押さえ（releaseAllSelfHoldsForPage）とは別物：こちらは相手が実際にクリックして
+ * 作った Hold・Event を片付ける。これをしないと、ページを取消しても Event.status が
+ * open/holding のまま残り、/unconfirmed（未確定の調整）に消えずに残り続けてしまう
+ * （社長指摘：削除したはずのページが一覧から消えないバグの修正）。
+ */
+export async function cancelRealEventsForPage(repo: Repository, page: BookingPageRec, now: number): Promise<void> {
+  try {
+    const releasedGoogleEventIds = await repo.cancelEventsForPage(page.id, now);
+    if (releasedGoogleEventIds.length === 0) return;
+    const gcfg = await googleConfigForUserId(page.organizerId);
+    if (!gcfg) return;
+    for (const eventId of releasedGoogleEventIds) {
+      try {
+        await deleteCalendarEvent(gcfg, eventId);
+      } catch {
+        /* degrade-safe：1件のカレンダー削除失敗が他に波及しないようにする */
+      }
+    }
+  } catch {
+    /* degrade-safe */
+  }
+}
+
+/**
  * 枠を Hold（§14 POST /events/{id}/holds）。resourceId は主催者枠（1:1）。
  *
  * 相手が仮押さえした瞬間、主催者の Google カレンダーにも「[調整中]」という一時的な予定を

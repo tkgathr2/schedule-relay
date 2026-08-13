@@ -206,6 +206,15 @@ export interface Repository {
    */
   listActiveHoldsByEvent(eventId: string, now: EpochMs): Promise<HoldRec[]>;
 
+  /**
+   * ページ取消時：そのページに属する未終了（draft/open/holding）の Event を全部 cancelled にし、
+   * それらに紐づく active な Hold（相手側の本物の仮押さえ）も全部 released にする。
+   * ページの isActive=false にするだけでは Event/Hold の状態が変わらず「未確定の調整」一覧に
+   * 残り続けてしまう不整合を防ぐための処理（degrade-safeな掃除用に、解放した Hold の
+   * googleEventId 一覧を返す）。
+   */
+  cancelEventsForPage(pageId: string, now: EpochMs): Promise<string[]>;
+
   // ---------- T3 投票型 ----------
   /**
    * 投票用候補を追加（無ければ作る）。同一 (eventId, slot) は再利用＝upsertCandidate と同じ正規化。

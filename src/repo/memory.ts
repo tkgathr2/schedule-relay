@@ -308,6 +308,22 @@ export class MemoryRepository implements Repository {
     return out;
   }
 
+  async cancelEventsForPage(pageId: string, _now: number): Promise<string[]> {
+    const nonTerminal = new Set<EventStatus>(['draft', 'open', 'holding']);
+    const releasedGoogleEventIds: string[] = [];
+    for (const ev of this.events.values()) {
+      if (ev.pageId !== pageId || !nonTerminal.has(ev.status)) continue;
+      for (const h of this.holds.values()) {
+        if (h.eventId === ev.id && h.status === 'active') {
+          h.status = 'released';
+          if (h.googleEventId) releasedGoogleEventIds.push(h.googleEventId);
+        }
+      }
+      ev.status = 'cancelled';
+    }
+    return releasedGoogleEventIds;
+  }
+
   // ---------- T3 投票型 ----------
   async addCandidate(eventId: string, slot: Slot): Promise<CandidateRec> {
     // 同一 (eventId, slot) は upsertCandidate と同じく再利用＝重複候補を作らない。
