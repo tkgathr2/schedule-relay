@@ -29,7 +29,7 @@ export interface AvailabilityInput {
 }
 
 /** busy 区間をバッファ分だけ前後に膨らませる。 */
-function inflate(busy: readonly Interval[], beforeMs: number, afterMs: number): Interval[] {
+export function inflate(busy: readonly Interval[], beforeMs: number, afterMs: number): Interval[] {
   return busy.map((b) => ({ start: b.start - beforeMs, end: b.end + afterMs }));
 }
 
