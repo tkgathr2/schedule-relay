@@ -13,6 +13,7 @@ import {
   releaseSelfHoldForSlot,
   listSelfHoldSlotsForPage,
   validateSlot,
+  cancelRealEventsForPage,
 } from '../booking.js';
 import { ServiceError, type ServiceErrorCode } from '../errors.js';
 import { expandWorkingWindows } from '../../domain/working-hours.js';
@@ -173,6 +174,40 @@ describe('T2 確定型フロー', () => {
     expect(hold.googleEventId).toBeNull();
     const conf = await confirmHold(repo, hold.id, 'guest-1', null, NOW + MIN);
     expect(conf.start).toBe(SLOT_10.start);
+  });
+});
+
+describe('ページ取消時：相手側の本物のEvent/Holdも片付ける（社長指摘：取消しても一覧から消えないバグの修正）', () => {
+  let repo: MemoryRepository;
+  beforeEach(() => {
+    repo = new MemoryRepository();
+  });
+
+  it('相手が仮押さえ中（holding）のページを取消すると、Eventがcancelledになりholdも解放される', async () => {
+    const page = await makePage(repo);
+    const { event } = await createEventForPage(repo, page.slug, 'idem-cancel-1');
+    const { hold } = await holdSlot(repo, event.id, SLOT_10, 'guest-1', NOW);
+    expect((await repo.getEvent(event.id))?.status).toBe('holding');
+
+    await cancelRealEventsForPage(repo, page, NOW);
+
+    expect((await repo.getEvent(event.id))?.status).toBe('cancelled');
+    expect((await repo.getHold(hold.id))?.status).toBe('released');
+    // /unconfirmed が使う「open|holding」の一覧からも消える
+    const stillListed = await repo.listEventsByStatus(['open', 'holding']);
+    expect(stillListed.some((e) => e.id === event.id)).toBe(false);
+  });
+
+  it('確定済み(confirmed)のEventはcancelledに変えない（すでに終了した調整には触らない）', async () => {
+    const page = await makePage(repo);
+    const { event } = await createEventForPage(repo, page.slug, 'idem-cancel-2');
+    const { hold } = await holdSlot(repo, event.id, SLOT_10, 'guest-1', NOW);
+    await confirmHold(repo, hold.id, 'guest-1', null, NOW + MIN);
+    expect((await repo.getEvent(event.id))?.status).toBe('confirmed');
+
+    await cancelRealEventsForPage(repo, page, NOW + MIN);
+
+    expect((await repo.getEvent(event.id))?.status).toBe('confirmed'); // 変わらない
   });
 });
 

@@ -494,6 +494,27 @@ export class PrismaRepository implements Repository {
     return rows.map(toHoldRec);
   }
 
+  async cancelEventsForPage(pageId: string, _now: number): Promise<string[]> {
+    const events = await this.db.event.findMany({
+      where: { pageId, status: { in: ['draft', 'open', 'holding'] } },
+      select: { id: true },
+    });
+    const eventIds = events.map((e) => e.id);
+    if (eventIds.length === 0) return [];
+
+    const holds = await this.db.hold.findMany({
+      where: { eventId: { in: eventIds }, status: 'active' },
+      select: { id: true, googleEventId: true },
+    });
+
+    await this.db.$transaction([
+      this.db.hold.updateMany({ where: { id: { in: holds.map((h) => h.id) } }, data: { status: 'released' } }),
+      this.db.event.updateMany({ where: { id: { in: eventIds } }, data: { status: 'cancelled' } }),
+    ]);
+
+    return holds.map((h) => h.googleEventId).filter((id): id is string => !!id);
+  }
+
   // ---------- T3 投票型 ----------
   async addCandidate(eventId: string, slot: Slot): Promise<CandidateRec> {
     return this.upsertCandidate(eventId, slot);

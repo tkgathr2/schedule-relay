@@ -1,7 +1,9 @@
 /**
  * POST /api/pages/{slug}/cancel — 予約ページを非アクティブにする（軽実装）。
  *   isActive=false。既に false でも 200。存在しなければ 404。
- *   あわせて、リンク発行時に張った「自分用の仮押さえ」が残っていれば全部解除する（degrade-safe）。
+ *   あわせて、リンク発行時に張った「自分用の仮押さえ」が残っていれば全部解除し（degrade-safe）、
+ *   相手側の本物のEvent/Holdも全部cancelled/releasedにする（degrade-safe。これをしないと
+ *   /unconfirmed の一覧からページ取消後も消えずに残り続けるバグになる）。
  */
 import { NextResponse } from 'next/server';
 import { getRepository } from '@/repo/index';
@@ -9,7 +11,7 @@ import { ServiceError } from '@/service/errors';
 import { jsonError } from '@/service/http';
 import { assertValidSlug } from '@/service/security';
 import { requireSessionUserId } from '@/service/auth/session';
-import { releaseAllSelfHoldsForPage } from '@/service/booking';
+import { releaseAllSelfHoldsForPage, cancelRealEventsForPage } from '@/service/booking';
 
 export async function POST(
   _req: Request,
@@ -30,7 +32,9 @@ export async function POST(
     }
     const page = await repo.deactivatePageBySlug(slug);
     if (!page) throw new ServiceError('NOT_FOUND', `slug が見つかりません: ${slug}`);
-    await releaseAllSelfHoldsForPage(repo, page, Date.now());
+    const now = Date.now();
+    await releaseAllSelfHoldsForPage(repo, page, now);
+    await cancelRealEventsForPage(repo, page, now);
     return NextResponse.json({ page });
   } catch (e) {
     return jsonError(e);
