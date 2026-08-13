@@ -205,6 +205,14 @@ function pageTitle(page: BookingPageRec): string {
 const SELF_HOLD_HOLDER_ID = 'organizer-self';
 const SELF_HOLD_TTL_MIN = 180 * 24 * 60; // 180日＝TTLで自然失効させず、確定/取消で明示的に片付ける前提
 
+// 自分用仮押さえの最終安全弁（社長指示・2026-08-13）。
+// 呼び出し側（propose.tsx）は既に「候補がある日ごとに代表1件」まで絞ってから渡してくるため、
+// 通常はここに到達する時点で件数=対象日数になっている。ただし候補抽出件数(maxSlots)は最大200まで
+// 選べる設定になっており、それら全部が異なる日に散らばる極端なケースでは200件近い仮押さえが
+// 作られ得る。以前の事故（10件キャップが日付集中を招いた）を繰り返さないよう、
+// 日ベースの絞り込みは維持したまま、通常の運用ではまず到達しない大きめの値を最後の歯止めとして置く。
+const MAX_SELF_HOLD_SLOTS = 100;
+
 function selfEventIdempotencyKey(pageId: string): string {
   return `self:${pageId}`;
 }
@@ -245,7 +253,7 @@ export async function createSelfHoldsForPage(
   const expiresAt = now + SELF_HOLD_TTL_MIN * MINUTE_MS;
   const gcfg = await googleConfigForUserId(page.organizerId);
 
-  for (const slot of slots) {
+  for (const slot of slots.slice(0, MAX_SELF_HOLD_SLOTS)) {
     let hold: HoldRec;
     try {
       const candidate = await repo.upsertCandidate(selfEvent.id, slot);

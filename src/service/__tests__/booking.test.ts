@@ -422,6 +422,17 @@ describe('自分用の仮押さえ（社長要望：リンク発行時点で自�
     await createSelfHoldsForPage(repo, page, [], NOW);
     expect(await listSelfHoldSlotsForPage(repo, page, NOW)).toEqual([]);
   });
+
+  it('候補数が最大件数(100)を超えても、最終安全弁として100件で打ち切る（社長指示・2026-08-13）', async () => {
+    const page = await makePage(repo);
+    // 1日1件ずつ、200日分（日次候補抽出の上限maxSlots=200が全部異なる日に散らばる極端ケースを模す）
+    const manySlots = Array.from({ length: 200 }, (_, i) => ({
+      start: jst(10, 0) + i * 24 * 60 * 60 * 1000,
+      end: jst(10, 30) + i * 24 * 60 * 60 * 1000,
+    }));
+    await createSelfHoldsForPage(repo, page, manySlots, NOW);
+    expect(await listSelfHoldSlotsForPage(repo, page, NOW)).toHaveLength(100);
+  });
 });
 
 describe('resolveSettings: 曜日別 working_hours の往復（回帰防止・指摘14/#16）', () => {
