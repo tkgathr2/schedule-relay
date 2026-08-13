@@ -111,6 +111,9 @@ export default function UnconfirmedPage() {
   const [events, setEvents] = useState<EventRow[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  // 複数選択して一括削除するための選択状態（社長要望：1件ずつ🗑️を押さず選んでまとめて消したい）。
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -151,6 +154,7 @@ export default function UnconfirmedPage() {
 
   useEffect(() => {
     void load();
+    setSelected(new Set());
   }, [load]);
 
   // この調整を削除する（ページを非アクティブ化＝相手のリンクも無効になる）。
@@ -168,6 +172,49 @@ export default function UnconfirmedPage() {
     } catch {
       setToast('削除に失敗しました');
       setTimeout(() => setToast(null), 1500);
+    }
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (!events) return;
+    setSelected((prev) => (prev.size === events.length ? new Set() : new Set(events.map((e) => e.id))));
+  };
+
+  // 選択した複数件をまとめて削除する（社長要望：1件ずつ🗑️を押さず選んでまとめて消したい）。
+  const deleteSelected = async () => {
+    if (!events || selected.size === 0) return;
+    const rows = events.filter((e) => selected.has(e.id));
+    if (!confirm(`選択した${rows.length}件を削除しますか？\n相手が持っているリンクも無効になります。`)) return;
+    setBulkDeleting(true);
+    try {
+      const results = await Promise.all(
+        rows.map(async (row) => {
+          const slug = row.page?.slug;
+          if (!slug) return false;
+          try {
+            const res = await fetch(`/api/pages/${slug}/cancel`, { method: 'POST' });
+            return res.ok;
+          } catch {
+            return false;
+          }
+        }),
+      );
+      const failCount = results.filter((ok) => !ok).length;
+      setToast(failCount === 0 ? `${rows.length}件を削除しました` : `${rows.length - failCount}件削除・${failCount}件失敗`);
+      setTimeout(() => setToast(null), 1500);
+      setSelected(new Set());
+      void load();
+    } finally {
+      setBulkDeleting(false);
     }
   };
 
@@ -207,6 +254,16 @@ export default function UnconfirmedPage() {
             <h1>未確定の調整</h1>
             <div className="sub">相手の返事待ち、または仮押さえ中の調整一覧です。</div>
           </div>
+          {selected.size > 0 && (
+            <button
+              className="sc-btn"
+              style={{ background: '#dc2626', color: '#fff' }}
+              disabled={bulkDeleting}
+              onClick={deleteSelected}
+            >
+              {bulkDeleting ? '削除中…' : `選択した${selected.size}件を削除`}
+            </button>
+          )}
         </div>
 
         {err && (
@@ -229,6 +286,14 @@ export default function UnconfirmedPage() {
             <table className="sc-list-table">
               <thead>
                 <tr>
+                  <th style={{ width: 32 }}>
+                    <input
+                      type="checkbox"
+                      checked={events.length > 0 && selected.size === events.length}
+                      onChange={toggleSelectAll}
+                      aria-label="すべて選択"
+                    />
+                  </th>
                   <th>打合せ時間</th>
                   <th>タイトル</th>
                   <th>参加者</th>
@@ -251,6 +316,14 @@ export default function UnconfirmedPage() {
                   const participants = e.page?.settings?.participants?.join('・') || '—';
                   return (
                     <tr key={e.id}>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={selected.has(e.id)}
+                          onChange={() => toggleSelect(e.id)}
+                          aria-label={`${title}を選択`}
+                        />
+                      </td>
                       <td>{dur}</td>
                       <td className="cell-title">
                         {title}
